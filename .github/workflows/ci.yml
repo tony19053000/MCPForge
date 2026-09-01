@@ -70,10 +70,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Scan tracked files for credential-shaped strings
+        # Only two files are exempt, and neither can hold a real credential:
+        # this workflow (it contains the patterns) and filters.py (it IS the
+        # detector). Tests are NOT exempt — their fixtures are assembled at
+        # runtime so no scanner-matching literal is ever committed.
         run: |
           if git grep -InE \
             'AIza[0-9A-Za-z_-]{20}|AQ\.[A-Za-z0-9_-]{30}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}' \
-            -- . ':!.github/workflows/ci.yml' ':!services/api/tests'; then
+            -- . ':!.github/workflows/ci.yml' \
+               ':!services/api/src/mcpforge/security/filters.py'; then
             echo "::error::Credential-shaped string found in a tracked file"
             exit 1
           fi
