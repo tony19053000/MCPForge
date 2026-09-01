@@ -1,0 +1,25 @@
+{
+  "name": "mcpforge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-native developer workspace that transforms web applications into safe, testable, WebMCP-compatible applications.",
+  "license": "MIT",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm run api:typecheck",
+    "lint": "npm run lint --workspaces --if-present && npm run api:lint",
+    "test": "npm run test --workspaces --if-present && npm run api:test",
+    "build": "npm run build --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspace=apps/web --if-present",
+    "api:dev": "cd services/api && uv run uvicorn mcpforge.main:app --reload",
+    "api:typecheck": "cd services/api && uv run mypy src",
+    "api:lint": "cd services/api && uv run ruff check .",
+    "api:test": "cd services/api && uv run pytest"
+  }
+}

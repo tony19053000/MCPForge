@@ -1,0 +1,78 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Credentials — never commit
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.crt
+*.cer
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+service-account*.json
+gcp-*.json
+firebase-adminsdk-*.json
+*.tfvars
+.npmrc
+.netrc
+.git-credentials
+**/secrets/**
+**/credentials/**
+**/.aws/**
+**/.ssh/**
+
+# Node
+node_modules/
+.npm/
+*.tsbuildinfo
+.eslintcache
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Build output
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+htmlcov/
+.coverage
+.coverage.*
+
+# Testing
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Editors / OS
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local scratch
+tmp/
+.tmp/
+*.local
