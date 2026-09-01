@@ -8,11 +8,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mcpforge.api import health, me
+from mcpforge.api import chat, health, me, projects
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
 from mcpforge.config import Settings, get_settings
+from mcpforge.gemini.google_provider import GoogleGenAIProvider
+from mcpforge.gemini.provider import GeminiProvider
 from mcpforge.logging import configure_logging, get_logger
+from mcpforge.store.memory import InMemoryStore
+from mcpforge.store.port import Store
 
 VERSION = "0.1.0"
 
@@ -41,6 +45,8 @@ def create_app(
     settings: Settings | None = None,
     *,
     token_verifier: TokenVerifier | None = None,
+    store: Store | None = None,
+    gemini: GeminiProvider | None = None,
 ) -> FastAPI:
     """Build the application.
 
@@ -63,6 +69,9 @@ def create_app(
     app.state.token_verifier = token_verifier or FirebaseIdTokenVerifier(
         settings.firebase_project_id
     )
+    # In-memory is the Phase 2 store. Firestore lands behind the same port later.
+    app.state.store = store or InMemoryStore()
+    app.state.gemini = gemini or GoogleGenAIProvider(settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -74,6 +83,8 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(me.router)
+    app.include_router(projects.router)
+    app.include_router(chat.router)
     return app
 
 
