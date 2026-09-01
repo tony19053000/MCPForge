@@ -61,14 +61,14 @@ MCPForge/
 │       ├── src/mcpforge/
 │       │   ├── main.py         app factory, routers, middleware
 │       │   ├── config.py       environment validation (fail fast)
-│       │   ├── logging.py      structured logging with redaction
+│       │   ├── logging.py      structured logging with log redaction
 │       │   ├── auth/           TokenVerifier port + provisional Firebase adapter
 │       │   ├── api/            HTTP routers (thin; no business logic)
 │       │   ├── agents/         the six runtime agents
 │       │   ├── orchestration/  state machine, run loop, events
 │       │   ├── gemini/         provider abstraction over google-genai
 │       │   ├── indexing/       repository index pipeline
-│       │   ├── security/       secret filter, path policy, redaction
+│       │   ├── security/      secret filter, path policy, prompt-context redaction
 │       │   ├── generation/     patch generation + framework adapters
 │       │   ├── github/         GitHub App client, branch + PR writer
 │       │   ├── execution/      SecureExecutionProvider implementations

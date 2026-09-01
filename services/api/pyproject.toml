@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "MCPForge backend — agent orchestration, repository analysis, and authorization."
 requires-python = ">=3.12"
 dependencies = [
+    "anyio>=4.0",
     "fastapi>=0.118",
     "uvicorn[standard]>=0.37",
     "pydantic>=2.11",

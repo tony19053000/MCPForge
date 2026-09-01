@@ -1,4 +1,10 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+
+/*
+ * Scan application source only. Tests contain example class strings — including
+ * deliberately wrong ones — and must not generate utilities in the bundle.
+ */
+@source "../";
 
 /*
  * MCPForge design tokens — 04_FRONTEND_SPEC.md §1.
@@ -121,6 +127,7 @@
   --color-pending: var(--pending);
   --color-pending-subtle: var(--pending-subtle);
   --color-focus: var(--focus);
+  --color-overlay: var(--overlay);
 }
 
 @layer base {

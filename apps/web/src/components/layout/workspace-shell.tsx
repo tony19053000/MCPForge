@@ -145,7 +145,7 @@ function Drawer({
         type="button"
         aria-label="Close panel"
         onClick={onClose}
-        className="absolute inset-0 bg-[--overlay]"
+        className="absolute inset-0 bg-overlay"
       />
       <div
         role="dialog"

@@ -66,7 +66,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **119 passing** — 71 web (Vitest), 48 API (pytest) |
+| Unit | **122 passing** — 74 web (Vitest), 48 API (pytest) |
 | Integration | Covered within the suites above: FastAPI routes exercised over ASGI transport with real RS256 tokens |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
 | Build | `npm run build` clean (web only — Python has no build step) |
