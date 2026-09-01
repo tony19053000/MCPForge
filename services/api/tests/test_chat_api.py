@@ -306,7 +306,8 @@ def test_the_handler_stops_pulling_from_the_model_on_disconnect(settings: Settin
 
     anyio.run(drive)
 
-    assert provider.stream.yielded < 50, (
+    # Lower bound too, so the test cannot pass by the stream never running.
+    assert 0 < provider.stream.yielded < 50, (
         f"handler pulled {provider.stream.yielded} chunks from the model after the "
         "client disconnected; the is_disconnected() check is not stopping the loop"
     )
@@ -338,3 +339,56 @@ def test_no_stream_event_carries_a_reasoning_shaped_field(client: TestClient) ->
         lowered = data.lower()
         for word in banned:
             assert word not in lowered, f"{name} event carried {word!r}: {data}"
+
+
+class FailingStream(ExplicitCloseStream):
+    """Yields a couple of chunks, then fails like a real upstream would."""
+
+    def __init__(self, raise_after: int = 2) -> None:
+        super().__init__(chunk_count=1000)
+        self._raise_after = raise_after
+
+    async def __anext__(self) -> str:
+        if self.yielded >= self._raise_after:
+            raise GeminiTransportError("503 upstream died", retryable=True)
+        return await super().__anext__()
+
+
+class FailingMidStreamProvider:
+    def __init__(self) -> None:
+        self.stream = FailingStream()
+
+    @property
+    def configured(self) -> bool:
+        return True
+
+    @property
+    def model(self) -> str:
+        return "fake"
+
+    async def generate_structured(self, request: object, schema: object) -> object:
+        raise NotImplementedError
+
+    def stream_text(self, request: object) -> ExplicitCloseStream:
+        return self.stream
+
+
+def test_the_stream_is_closed_even_when_the_model_fails_mid_response(
+    settings: Settings,
+) -> None:
+    """Covers the error path, where an `else:` would silently skip cleanup."""
+    provider = FailingMidStreamProvider()
+    app = create_app(
+        settings,
+        token_verifier=TokenIsUid(),
+        store=InMemoryStore(),
+        gemini=provider,  # type: ignore[arg-type]
+    )
+    with TestClient(app) as client:
+        session_id = make_session(client)
+        response = client.post(
+            f"/api/sessions/{session_id}/chat", json={"message": "hi"}, headers=auth()
+        )
+        errors = [data for name, data in read_sse(response.text) if name == "error"]
+        assert errors and "503" in errors[0]
+    assert provider.stream.closed is True

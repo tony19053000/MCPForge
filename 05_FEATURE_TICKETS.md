@@ -146,7 +146,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Structured call returns a validated Pydantic instance; malformed model output raises a typed error rather than propagating a partial object; no model id literal outside config; provider is unreachable from the web tier.
 **Tests.** Unit tests with the fake provider; contract test asserting re-validation rejects a schema-violating response; test asserting `GEMINI_MODEL` is respected; retry-exhaustion test.
 **Security.** API key backend-only. Prompts and responses never logged at info level; no file bodies in logs. Repository content is labelled untrusted in every prompt.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F2-02 — Session and conversation model
 **Purpose.** Persist the objects the whole product turns on, behind a swappable store.
@@ -157,7 +157,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Tests.** Store conformance suite, parameterised by adapter; model validation tests; state transition table tests.
 **Scope note.** The Firestore adapter moved to `F3-08` during the Phase 2 review. It needs a provisioned Firestore database, and nothing in Phase 2 requires persistence across a restart. Deferring it was recorded rather than quietly dropped.
 **Security.** No repository file content is persisted in conversation records. Store enforces per-user project ownership at the query level.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F2-03 — Chat API with streaming
 **Purpose.** Get model output to the browser without giving the browser model access.
@@ -167,7 +167,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Tokens stream to the UI; client disconnect cancels the upstream model call; unauthenticated request rejected; a user cannot read another user's session.
 **Tests.** Integration test over ASGI transport asserting the SSE event sequence; cancellation test; cross-user access test; web test for stream rendering.
 **Security.** Ownership enforced server-side on every request. No raw model reasoning is ever placed on the wire.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F2-04 — Workspace chat UI and activity timeline
 **Purpose.** The single continuous session that is MCPForge's primary interface.
@@ -177,7 +177,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** No raw chain-of-thought rendered anywhere — asserted by test; steps show counts, paths and exit codes only; no layout shift while streaming; timeline is keyboard navigable.
 **Tests.** RTL tests including an explicit assertion that reasoning-shaped fields are never rendered; reduced-motion test.
 **Security.** Client-side counterpart to the F2-03 rule; both tiers are tested independently so neither can regress alone.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F2-05 — Approval interaction UI and endpoints
 **Purpose.** The gate mechanism every consequential step depends on.
@@ -187,7 +187,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** UI state derives from server state only; a stale artifact hash invalidates the card; a decision by a non-owner is rejected; a second decision on a decided approval is rejected.
 **Tests.** Unit tests for hash mismatch, wrong actor and double-decision; RTL keyboard-operability, screen-reader-announcement and typed-confirmation tests. There is no expiry test because approvals deliberately do not expire on a clock — see `02_ARCHITECTURE.md` §6.
 **Security.** No client-side approval shortcut. No model-derived approval. This ticket implements the T4 control surface.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ---
 

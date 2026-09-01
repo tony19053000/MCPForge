@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**20%** — Phase 1 complete and verified. Phase 2 is implemented and in review; it advances to 30% only on a `[REVIEWER / TESTER]` PASS.
+**30%** — Phase 2 complete, verified by `[REVIEWER / TESTER]` on round 3.
 
 ## Current phase
 
-**Phase 2 — AI Workspace + Gemini (20% → 30%)** — in review.
+**Phase 3 — GitHub + Safe Repository Ingestion (30% → 40%)** — not yet started.
 
 ## Current ticket
 
-`F2-01`..`F2-05` — `IN_REVIEW`
+`F3-01` — GitHub App integration — `PENDING`
 
 ---
 
@@ -34,20 +34,19 @@
 | F1-05 | Application shell and landing page | PASS (round 3) |
 | F1-06 | Auth abstraction and provisional Firebase wiring | PASS (round 3) |
 | F1-07 | Error boundaries and CI baseline | PASS (round 3) |
+| F2-01 | Gemini provider | PASS (round 3) — verified live |
+| F2-02 | Session and conversation model | PASS (round 3) |
+| F2-03 | Chat API with streaming | PASS (round 3) — verified live |
+| F2-04 | Workspace chat UI and activity timeline | PASS (round 3) |
+| F2-05 | Approval interaction UI | PASS (round 3) |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F2-01 | Gemini provider | `IN_REVIEW` — verified live against the real API |
-| F2-02 | Session and conversation model | `IN_REVIEW` |
-| F2-03 | Chat API with streaming | `IN_REVIEW` — verified live end to end |
-| F2-04 | Workspace chat UI and activity timeline | `IN_REVIEW` |
-| F2-05 | Approval interaction UI | `IN_REVIEW` |
+None.
 
 ## Pending
 
-Phases 3–9, tickets `F3-01` through `F9-05`, plus `F3-08` (Firestore adapter, moved out of F2-02 during the Phase 2 review). See `05_FEATURE_TICKETS.md`.
+Phases 3–9, tickets `F3-01` through `F9-05`, including `F3-08` (Firestore adapter, moved out of F2-02 during the Phase 2 review). See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -71,7 +70,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **273 passing** — 130 web (Vitest/RTL), 143 API (pytest) |
+| Unit | **274 passing** — 130 web (Vitest/RTL), 144 API (pytest) |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -246,3 +245,73 @@ copy over `.env`; edit it line-targeted, or write only when it does not exist.
 
 **Next intended task.** `F2-02` — session and conversation model with the store
 port and its in-memory adapter.
+
+### 0005 — Phase 2: AI workspace and Gemini
+
+**What was built.** The product now holds a real conversation with a real model,
+and the approval gate that everything later depends on.
+
+- `gemini/` — provider port, `GoogleGenAIProvider` over `google-genai`, and a
+  fake that re-validates exactly like the real one. Two backends: an API key, or
+  Vertex over ADC with no secret at all.
+- `models/` — Project, Session, Turn, RunEvent, Approval, and the 26-state
+  transition table.
+- `store/` — port plus in-memory adapter, with a conformance suite parameterised
+  by adapter.
+- `api/` — projects, sessions, SSE chat, approvals, gate check, events.
+- `apps/web` — typed API client with streaming, the `/workspace` route, the chat
+  column, the activity timeline and the approval card.
+
+**274 tests** — 130 web, 144 API. Live-verified: a real structured call, a real
+stream, and a full real chat round trip through the API.
+
+**Decisions worth keeping.**
+
+1. **An approval binds to an artifact hash.** Approving a plan does not approve a
+   changed plan, and does not open a different gate. Approvals deliberately do
+   not expire on a clock — the hash is the invalidation mechanism, and a second
+   one would be a second thing to get wrong.
+2. **The actor comes from the verified token.** Sending `actor_uid` in a request
+   body does nothing, asserted by test.
+3. **No chain-of-thought, enforced in both tiers independently.** The API does
+   not send it; `isRenderableEvidence` refuses to render reasoning-shaped keys
+   even if it arrived. Either tier can regress without the other hiding it.
+4. **SDK automatic function calling is off, and now tested.** Every action is
+   orchestrated by our code behind persisted gates.
+5. **`transitions.py` is data, not enforcement.** The orchestrator that consults
+   it is F4-05. The docstring and `02_ARCHITECTURE.md` §6 both say so, because a
+   module that describes enforcement it does not perform is how false confidence
+   starts.
+
+**Review record — two rounds of FAIL, and both mattered.**
+
+Round 1 found nine defects. Four mutations had survived in the Gemini request
+config, meaning a control STATUS.md advertised had no test at all. The chat UI
+was dead code that no route mounted, so "tokens stream to the UI" was
+unobservable in the running product. Writing the missing client test then
+surfaced a real leak: stopping a stream early never released the response body.
+
+Round 2 found something worse. **My cancellation test passed with the entire fix
+deleted** — it was watching Python's own async-generator teardown, not the
+handler, and I had reported the defect cleared on that basis. Replaced with an
+async iterator that is deliberately not a generator, so only the handler's
+`finally` can close it. Each half of the fix is now independently killable.
+
+Round 2 also caught a STATUS row that had quietly become false: the client
+bundle *does* contain the Firebase Web config once `/workspace` mounts the SDK.
+Nothing unsafe — those are public identifiers — but the row claimed the bundle
+was free of all credential material, which stopped being true.
+
+**A real hole found while fixing that.** The CI credential scan matched only
+`AIza`-prefixed keys. The current Gemini key format is `AQ.`-prefixed, so **a
+leaked current-format key would have walked straight through the scan.** Both
+the tracked-file scan and a new built-bundle scan now cover it.
+
+**What NOT to change accidentally.** The artifact-hash binding on approvals. The
+actor-from-token rule. `ExplicitCloseStream` in the chat tests — it is not a
+generator on purpose, and making it one silently disables the cancellation
+tests. The `finally` (not `else`) in the chat handler. The `AQ.` pattern in both
+credential scans.
+
+**Next intended task.** `F3-01` — GitHub App integration. Needs the owner to
+register a GitHub App (blocker B-03).
