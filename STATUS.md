@@ -71,7 +71,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **272 passing** — 130 web (Vitest/RTL), 142 API (pytest) |
+| Unit | **273 passing** — 130 web (Vitest/RTL), 143 API (pytest) |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -86,7 +86,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Control | State |
 |---|---|
 | Secure execution | Not implemented. Target for Phase 3 is `DEVELOPMENT_ISOLATION` |
-| Client bundle | Verified free of `NEXT_PUBLIC_` values and any credential material |
+| Client bundle | Contains the Firebase Web config (`NEXT_PUBLIC_FIREBASE_*`) and `NEXT_PUBLIC_AUTH_PROVIDERS` — public browser identifiers by design, required for sign-in. Verified free of the Gemini key, any model SDK, and any service-account or private-key material. Enforced by a CI step that scans the built bundle |
 | Auth enforcement | Server-side on every authenticated route; RS256 pinned; `alg:none`, expired, wrong-issuer, wrong-audience and forged tokens all rejected by test |
 | Model tool invocation | SDK automatic function calling explicitly disabled, asserted by test |
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |

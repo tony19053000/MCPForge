@@ -29,6 +29,23 @@ jobs:
       - run: npm run lint --workspace=apps/web
       - run: npm run test --workspace=apps/web
       - run: npm run build --workspace=apps/web
+      - name: Client bundle carries no server credential
+        # The Firebase Web config is public by design and is expected here.
+        # The Gemini key, a model SDK, or any private-key material is not.
+        run: |
+          BUNDLE=apps/web/.next
+          fail=0
+          for pattern in 'AQ\.[A-Za-z0-9_-]\{20,\}' 'GEMINI_API_KEY' 'generativelanguage' '@google/genai' 'BEGIN [A-Z ]*PRIVATE KEY' 'service_account'; do
+            if grep -rIl "$pattern" "$BUNDLE" 2>/dev/null | head -1 | grep -q .; then
+              echo "::error::Found '$pattern' in the client bundle"
+              fail=1
+            fi
+          done
+          if [ "$fail" = "1" ]; then exit 1; fi
+          echo "Client bundle contains no server credential or model SDK."
+          echo "The Firebase Web config IS inlined here, and that is correct:"
+          echo "it is a public browser identifier, not a secret."
+          echo "The Gemini key is 'AQ.'-prefixed and is scanned for above."
 
   api:
     name: API (ruff · mypy · pytest)
@@ -55,7 +72,7 @@ jobs:
       - name: Scan tracked files for credential-shaped strings
         run: |
           if git grep -InE \
-            'AIza[0-9A-Za-z_-]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}' \
+            'AIza[0-9A-Za-z_-]{20}|AQ\.[A-Za-z0-9_-]{30}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}' \
             -- . ':!.github/workflows/ci.yml' ':!services/api/tests'; then
             echo "::error::Credential-shaped string found in a tracked file"
             exit 1

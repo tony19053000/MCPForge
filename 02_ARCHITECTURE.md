@@ -233,8 +233,6 @@ Rules:
 - Every transition is checked against the table. An illegal transition raises; it does not warn.
 - Every transition is persisted with actor (`user` | `system` | `agent:<n>`), timestamp, and cause.
 - `SECURITY_REVIEW_FAILED` and `VALIDATION_FAILED` route back to `GENERATION_RUNNING` with the findings as input, bounded by a retry limit; on exhaustion the run halts and reports.
-
-**Not yet built (Phase 4, ticket F4-05).** The table and its errors exist and are tested, but no production code consults them yet. The retry bound, the halt-and-report terminal state, and the persisted transition record (actor, timestamp, cause) all land with the orchestrator. Until then, do not describe transitions as enforced.
 - Approval states are gates: the transition out of any `*_APPROVAL_PENDING` state requires a persisted `Approval` record with `status == APPROVED`, an authenticated user id, and a payload hash matching the artifact being approved. Approving a tool plan does not approve the patch that plan produced.
 
 `Approval` record: `{ id, project_id, session_id, gate, artifact_hash, status: PENDING|APPROVED|REJECTED, actor_uid, requested_at, decided_at }`.
@@ -242,6 +240,8 @@ Rules:
 **Approvals do not expire on a clock, deliberately.** A time limit would add a second way for a gate to close and a second thing to get wrong. The artifact hash already does the work: any change to what was approved invalidates the approval, which is the case that actually matters. If wall-clock expiry is ever wanted, it is added here first.
 
 Because the approval carries the artifact hash, a regenerated patch invalidates a prior approval automatically.
+
+**Not yet built (Phase 4, ticket F4-05).** The table and its errors exist and are tested, but no production code consults them yet. The retry bound, the halt-and-report terminal state, and the persisted transition record (actor, timestamp, cause) all land with the orchestrator. Until then, do not describe transitions as enforced.
 
 ## 7. Activity events
 

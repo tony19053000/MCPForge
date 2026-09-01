@@ -177,12 +177,40 @@ def test_an_empty_message_is_rejected(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-class RecordingStreamProvider:
-    """Records whether its stream was closed, so cancellation is observable."""
+class ExplicitCloseStream:
+    """An async *iterator*, deliberately not an async generator.
 
-    def __init__(self) -> None:
+    Python tears down async generators by itself. That is why an earlier version
+    of this test passed with the handler's cleanup deleted: the fake's `finally`
+    ran during garbage collection, not because the handler did anything.
+
+    This class records closure only when `aclose()` is actually awaited, so the
+    handler's `finally` block is the only thing that can set it.
+    """
+
+    def __init__(self, chunk_count: int) -> None:
+        self.chunk_count = chunk_count
+        self.yielded = 0
         self.closed = False
-        self.chunks_yielded = 0
+
+    def __aiter__(self) -> ExplicitCloseStream:
+        return self
+
+    async def __anext__(self) -> str:
+        if self.yielded >= self.chunk_count:
+            raise StopAsyncIteration
+        self.yielded += 1
+        return f"chunk-{self.yielded} "
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class CountingStreamProvider:
+    """Hands out one ExplicitCloseStream so the test can inspect it afterwards."""
+
+    def __init__(self, chunk_count: int = 5000) -> None:
+        self.stream = ExplicitCloseStream(chunk_count)
 
     @property
     def configured(self) -> bool:
@@ -195,42 +223,93 @@ class RecordingStreamProvider:
     async def generate_structured(self, request: object, schema: object) -> object:
         raise NotImplementedError
 
-    async def stream_text(self, request: object):  # type: ignore[no-untyped-def]
-        try:
-            for i in range(1000):
-                self.chunks_yielded = i + 1
-                yield f"chunk-{i} "
-        finally:
-            self.closed = True
+    def stream_text(self, request: object) -> ExplicitCloseStream:
+        return self.stream
 
 
-def test_the_upstream_stream_is_closed_when_the_response_ends(settings: Settings) -> None:
-    """A dropped or completed client must not leave a model call running.
-
-    The handler closes the upstream generator in a finally block, so the model
-    stream is torn down whether the response completed, errored, or the client
-    disconnected.
-    """
-    provider = RecordingStreamProvider()
-    app = create_app(
+def _app_with(provider: CountingStreamProvider, settings: Settings):  # type: ignore[no-untyped-def]
+    return create_app(
         settings,
         token_verifier=TokenIsUid(),
         store=InMemoryStore(),
         gemini=provider,  # type: ignore[arg-type]
     )
-    with TestClient(app) as client:
+
+
+def test_the_handler_closes_the_upstream_stream_itself(settings: Settings) -> None:
+    """The `finally: await stream_iter.aclose()` in chat.py is what closes it.
+
+    ExplicitCloseStream is not an async generator, so nothing in the runtime
+    will close it on our behalf. If the handler's cleanup is removed, this fails.
+    """
+    provider = CountingStreamProvider(chunk_count=3)
+    with TestClient(_app_with(provider, settings)) as client:
         session_id = make_session(client)
-        with client.stream(
-            "POST",
-            f"/api/sessions/{session_id}/chat",
-            json={"message": "long answer please"},
-            headers=auth(),
-        ) as response:
-            assert response.status_code == 200
-            for _ in zip(response.iter_lines(), range(5), strict=False):
-                pass
-        # Leaving the context manager drops the client.
-    assert provider.closed is True
+        response = client.post(
+            f"/api/sessions/{session_id}/chat", json={"message": "hi"}, headers=auth()
+        )
+        assert response.status_code == 200
+    assert provider.stream.closed is True
+
+
+def test_the_handler_stops_pulling_from_the_model_on_disconnect(settings: Settings) -> None:
+    """`if await request.is_disconnected(): break` is what stops the loop.
+
+    The ASGI app is driven directly so the disconnect is deterministic: the
+    receive channel yields the request body once, then http.disconnect forever.
+    Without the check, the handler drains all 5000 chunks.
+    """
+    import anyio
+
+    provider = CountingStreamProvider(chunk_count=5000)
+    app = _app_with(provider, settings)
+
+    async def drive() -> None:
+        # Create the session through the normal client first.
+        with TestClient(app) as client:
+            session_id = make_session(client)
+
+        body = b'{"message":"long answer please"}'
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.1"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": f"/api/sessions/{session_id}/chat",
+            "raw_path": f"/api/sessions/{session_id}/chat".encode(),
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"authorization", f"Bearer {OWNER}".encode()),
+            ],
+            "client": ("test", 1234),
+            "server": ("testserver", 80),
+        }
+
+        sent_body = False
+
+        async def receive() -> dict[str, object]:
+            nonlocal sent_body
+            if not sent_body:
+                sent_body = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict[str, object]) -> None:
+            return None
+
+        await app(scope, receive, send)
+
+    anyio.run(drive)
+
+    assert provider.stream.yielded < 50, (
+        f"handler pulled {provider.stream.yielded} chunks from the model after the "
+        "client disconnected; the is_disconnected() check is not stopping the loop"
+    )
 
 
 def test_activity_events_are_emitted_so_the_no_reasoning_check_is_not_vacuous(
