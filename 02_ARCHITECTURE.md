@@ -96,7 +96,8 @@ MCPForge/
 | LLM SDK | `google-genai` (Python) | The official current SDK. `google-generativeai` is obsolete and banned |
 | Model | `GEMINI_MODEL` env var, default `gemini-3.7-flash` | Verified against ai.google.dev model docs at Phase 0. Never hardcoded in logic |
 | Agent framework | None — ours | LangChain/CrewAI/AutoGen are banned in V1 |
-| Auth | Firebase Authentication | Supports the full intended provider set (Google, GitHub, Microsoft, Apple, email) |
+| Auth | Firebase Authentication — **provisional**, behind a port | Fastest correct path to a real Google sign-in today. Not committed to for production; see §3.2 |
+| Server-side Google credentials | Application Default Credentials (ADC) | Organization policy blocks service-account key downloads. No key file exists or is depended on |
 | Store | Firestore behind a port interface; in-memory adapter for tests | Google ecosystem; swappable |
 | GitHub | GitHub App, per-repository installation | Scoped access, short-lived installation tokens |
 | Web tests | Vitest, React Testing Library, Playwright | |
@@ -120,6 +121,35 @@ Rules:
 - The model id comes from config, never a literal.
 - Every call carries a `TraceContext` (project, run, agent, step) for the activity timeline.
 - Prompt assembly is the only place repository content enters, and it takes **already-filtered** context objects — see §5.
+
+### 3.2 Authentication — provisional by design
+
+Firebase Authentication with Google sign-in is **the current implementation, not the decided architecture.** The likely production direction is direct Google OAuth ("Sign in with Google"), particularly for a Vercel deployment. Phase 1 therefore optimises for *removability* rather than for Firebase depth.
+
+Two ports keep the decision reversible:
+
+```python
+class TokenVerifier(Protocol):
+    async def verify(self, raw_token: str) -> VerifiedIdentity: ...
+```
+```ts
+interface AuthProvider {
+  signIn(provider: ProviderId): Promise<Session>
+  signOut(): Promise<void>
+  currentSession(): Session | null
+  onChange(cb: (s: Session | null) => void): Unsubscribe
+}
+```
+
+`VerifiedIdentity` is ours — `{ subject, email, email_verified, issuer, claims }` — and is the only identity type the rest of the backend sees. No Firebase type crosses either port. Swapping to Google OAuth means writing one new `TokenVerifier` and one new `AuthProvider`; nothing in the orchestrator, store, or API layer changes.
+
+**Backend verification uses no Firebase SDK and no credentials.** A Firebase ID token is a standard RS256 JWT signed by Google, with a public JWKS endpoint. `FirebaseIdTokenVerifier` validates signature, `iss` (`https://securetoken.google.com/<project>`), `aud` (`<project>`), `exp`, and a non-empty `sub`, using PyJWT with a cached JWKS client. This means:
+
+- No `firebase-admin` dependency for authentication, and therefore no service-account key — which matters, because organization policy blocks downloading one.
+- A direct-Google-OAuth verifier is the same code with a different issuer, audience and JWKS URL.
+- The client SDK stays confined to `apps/web`; the backend never imports Firebase at all.
+
+**Server-side Google credentials use ADC.** Where the backend needs Google credentials for something other than token verification — Firestore — it uses Application Default Credentials, obtained in development with `gcloud auth application-default login` and in production from the deployment's workload identity. `GOOGLE_APPLICATION_CREDENTIALS` pointing at a downloaded key file is **not** a supported configuration; no such file exists, is committed, or is depended upon.
 
 ## 4. Runtime agents
 

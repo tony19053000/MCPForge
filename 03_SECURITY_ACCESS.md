@@ -92,6 +92,7 @@ This is defence in depth, not a proof. A secret that looks like ordinary source 
 - GitHub App with per-repository installation. Never request account-wide repository access.
 - The App private key is backend-only, loaded from the environment, never logged.
 - Installation tokens are minted per operation and short-lived; they are never persisted.
+- Authentication is **provisional and replaceable** (`02_ARCHITECTURE.md` §3.2). Whichever identity provider is in use, the same rules bind: the backend verifies the token itself on every authenticated request, a client-supplied identity is never trusted, and only a verified `subject` is used for ownership checks. Changing provider changes one adapter and no security control.
 - MCPForge user authentication is **separate** from GitHub repository authorization. Signing into MCPForge with GitHub grants identity, not repository access. Repository access requires the App installation flow. These are distinct records in the store and distinct checks in code.
 - Branch naming: `mcpforge/webmcp-<project-or-workflow-slug>`.
 - Never push to the default or any protected branch. Never force push. Never rewrite history. Never delete branches the user created.
@@ -134,7 +135,9 @@ MCPForge's WebMCP surface follows the same rules it enforces on others. Read too
 
 - Gemini API key: backend only. Never in a `NEXT_PUBLIC_*` variable, never proxied in a way that lets a client choose arbitrary prompts without our system instruction.
 - GitHub App private key: backend only.
-- Firebase Admin credentials: backend only. The Firebase **web** config is public by design and is the only Firebase material in the client.
+- **No service-account key files.** Organization policy blocks their creation, and the architecture does not want them. Server-side Google credentials come from Application Default Credentials — `gcloud auth application-default login` in development, workload identity in production. A downloaded key file is never created, never committed, and never a supported configuration; `.gitignore` blocks the common filenames regardless.
+- The local ADC file (`~/.config/gcloud/application_default_credentials.json`) lives outside the repository and is never copied into it, into a container image, into a log, or into a prompt.
+- **Authentication needs no credentials at all.** Firebase ID tokens are verified against Google's public JWKS by signature, issuer, audience and expiry. The backend imports no Firebase SDK. The Firebase **web** config is public by design and is the only Firebase material anywhere, and it lives in the client.
 - `.env` is never committed. `.env.example` contains variable names and non-secret defaults only.
 - Backend verifies the Firebase ID token on every authenticated request; the client's claim of identity is never trusted.
 - Logs redact tokens, keys and file bodies. Prompt/response retention for debugging is server-side, access-controlled, and excludes quarantined content.

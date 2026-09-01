@@ -45,7 +45,8 @@ Phases 1–9, tickets `F1-01` through `F9-05`. See `05_FEATURE_TICKETS.md`.
 | ID | Blocker | Impact | Status |
 |---|---|---|---|
 | B-01 | No Gemini API key configured | Phase 2 cannot run live model calls; provider and fake-provider tests can still be built | Open — needs owner to supply `GEMINI_API_KEY` |
-| B-02 | No Firebase project configured | Phase 1 auth can be built against the abstraction; real sign-in needs a project | Open — needs owner |
+| B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally (quota project `launchforge-tee`) | Closed |
+| B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
 | B-03 | No GitHub App registered | Phase 3 client can be built and unit-tested against a mocked API; real installation needs the App | Open — needs owner to register the App and supply id + private key |
 | B-04 | No GCP Confidential Space infrastructure | Ticket `F8-02` cannot be completed and is marked `BLOCKED`. **It will not be simulated or marked done.** Development isolation continues to work and is labelled honestly | Open — expected; Phase 8 |
 
@@ -78,6 +79,8 @@ Phase 0 verification was a documentation consistency review, not a test run. No 
 | Repository access mode | Not implemented. Default will be `READ_ONLY` |
 | Branch protection | Not implemented. Writer will be branch + PR only |
 | Credentials in repository | None. `.env` ignored; `.env.example` contains names only |
+| Service-account keys | None, by design. Not created, not committed, not a supported configuration. Server-side Google access uses ADC |
+| Auth posture | Provisional Firebase Auth behind a `TokenVerifier` / `AuthProvider` port pair. Backend imports no Firebase SDK and needs no credentials to verify a token |
 | Banned dependencies | None installed — no dependencies installed at all |
 
 ---
@@ -144,3 +147,21 @@ Files introduced:
 - `generation/` was referenced by ticket F5-04 but absent from the architecture's directory tree. Added.
 
 **Next intended task.** `F1-01` — scaffold the Next.js application in `apps/web` with TypeScript strict and Tailwind, followed by `F1-02` (FastAPI service scaffold).
+
+### 0002 — Authentication decision revised before Phase 1
+
+**Owner input.** A Firebase project was created with Google sign-in enabled, but **Firebase Auth is not committed to as the production solution** — the likely direction is direct Google OAuth, especially for a Vercel deployment. Service-account key creation is blocked by organization policy. Local Application Default Credentials are configured (`gcloud auth application-default login`, quota project `launchforge-tee`). Phase 1 must not block on final auth architecture, and authentication must stay cleanly removable.
+
+**What changed, and why.**
+
+1. **No `firebase-admin` dependency, and no service-account key.** A Firebase ID token is a standard RS256 JWT signed by Google with a public JWKS endpoint, so the backend verifies it directly with PyJWT — signature, `iss`, `aud`, `exp`, non-empty `sub`. This needs no credentials at all. It turns the organization-policy blocker into a non-issue rather than a workaround, removes a heavy dependency, and makes the eventual swap to Google OAuth a change of issuer, audience and JWKS URL in one adapter.
+2. **Two ports, and no vendor type crosses either.** `TokenVerifier` → our `VerifiedIdentity` on the backend; `AuthProvider` → our `Session` on the web. The orchestrator, store and API layer never see a Firebase type. F1-06 now tests this directly: a test asserts `firebase` appears in no backend import, and a second `TokenVerifier` implementation proves the port is provider-agnostic.
+3. **ADC for server-side Google credentials.** Development uses the local ADC file; production uses the deployment's workload identity. `GOOGLE_APPLICATION_CREDENTIALS` pointing at a key file is explicitly unsupported. `.env.example` was rewritten accordingly (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_QUOTA_PROJECT`).
+
+**Documents updated.** `02_ARCHITECTURE.md` §3 table and new §3.2; `03_SECURITY_ACCESS.md` §9 credential rules and §6 auth-replaceability rule; `.env.example`; `05_FEATURE_TICKETS.md` F1-06; blockers B-02 (closed) and B-05 (closed by design change).
+
+**What NOT to change accidentally.** The two ports, and the rule that no vendor identity type crosses them. The absence of any service-account key path. The fact that token verification is credential-free — if someone "simplifies" it back to `firebase-admin`, the organization-policy blocker returns and the swap cost goes up.
+
+**Unresolved.** Final production auth (Firebase Auth vs direct Google OAuth) is deliberately undecided and is not a blocker. Deployment target is likely Vercel for the web tier; the Python service's hosting is not yet decided and is not needed until Phase 2.
+
+**Next intended task.** `F1-01` — Next.js application scaffold.

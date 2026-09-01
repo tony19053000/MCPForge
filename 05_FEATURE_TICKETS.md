@@ -114,14 +114,14 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Security.** none specific.
 **Status.** `PENDING`
 
-### F1-06 — Auth abstraction and Firebase wiring
-**Purpose.** Identity, with providers labelled honestly.
-**Files.** `apps/web/src/lib/auth/**`, `services/api/src/mcpforge/api/deps.py`
+### F1-06 — Auth abstraction and provisional Firebase wiring
+**Purpose.** Identity today, replaceable tomorrow. Firebase Auth is the current implementation, not the decided architecture — see `02_ARCHITECTURE.md` §3.2.
+**Files.** `apps/web/src/lib/auth/**`, `services/api/src/mcpforge/auth/**`, `services/api/src/mcpforge/api/deps.py`
 **Dependencies.** F1-03
-**Implementation.** `AuthProvider` interface on the web; Firebase Auth implementation with the providers that are actually configured; backend verifies Firebase ID tokens via Admin SDK on every authenticated route. Unconfigured providers render disabled with a reason.
-**Acceptance criteria.** Sign-in works for at least one real provider; unconfigured providers are visibly disabled, never fake; backend rejects requests with missing/invalid/expired tokens; identity is never trusted from the client body.
-**Tests.** Unit tests for token verification (valid, expired, wrong audience, malformed); RTL test that disabled providers are not clickable.
-**Security.** MCPForge identity must be distinct from GitHub repository authorization — asserted by test.
+**Implementation.** `AuthProvider` port on the web with a Firebase adapter (Google sign-in, the one provider actually configured); `TokenVerifier` port on the backend with `FirebaseIdTokenVerifier` validating the ID token against Google's public JWKS — signature, `iss`, `aud`, `exp`, non-empty `sub` — using PyJWT with a cached JWKS client. **No `firebase-admin` dependency and no service-account key**, because organization policy blocks key creation and the architecture does not want one. Server-side Google credentials elsewhere come from ADC. Unconfigured providers render disabled with a reason.
+**Acceptance criteria.** Google sign-in works end to end; unconfigured providers are visibly disabled, never fake; the backend rejects missing, malformed, expired, wrong-issuer and wrong-audience tokens; identity is never taken from a request body; **no Firebase type crosses either port** — the backend's `VerifiedIdentity` and the web's `Session` are ours; the backend imports no Firebase SDK; no code path reads a service-account key file.
+**Tests.** Verifier unit tests for valid, expired, wrong-audience, wrong-issuer, malformed and unsigned tokens against a locally generated key pair; a test asserting `firebase` appears in no backend import; RTL test that disabled providers are not clickable; a swap test constructing a second `TokenVerifier` to prove the port is genuinely provider-agnostic.
+**Security.** MCPForge identity must be distinct from GitHub repository authorization — asserted by test. Token verification happens server-side on every authenticated request; a client-supplied identity is never trusted.
 **Status.** `PENDING`
 
 ### F1-07 — Error boundaries and CI baseline
