@@ -61,6 +61,8 @@ MCPForge/
 │       ├── src/mcpforge/
 │       │   ├── main.py         app factory, routers, middleware
 │       │   ├── config.py       environment validation (fail fast)
+│       │   ├── logging.py      structured logging with redaction
+│       │   ├── auth/           TokenVerifier port + provisional Firebase adapter
 │       │   ├── api/            HTTP routers (thin; no business logic)
 │       │   ├── agents/         the six runtime agents
 │       │   ├── orchestration/  state machine, run loop, events

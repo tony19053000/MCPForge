@@ -110,7 +110,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Dependencies.** F1-04
 **Implementation.** Sidebar, workspace column, context panel; responsive behaviour per spec §11; landing page describing the real product without inventing capabilities.
 **Acceptance criteria.** Layout correct at desktop/tablet/mobile breakpoints; no horizontal overflow; landing copy claims nothing unbuilt.
-**Tests.** RTL layout tests; Playwright viewport smoke tests.
+**Tests.** RTL tests for the three regions, the icon rail, the drawer (open, Escape, close) and region omission. Playwright viewport smoke tests are deferred to `F9-03`, where Playwright is introduced — no `test:e2e` script exists until then, rather than one that fails.
 **Security.** none specific.
 **Status.** `PENDING`
 
@@ -128,9 +128,9 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Purpose.** Contained failure and an enforced quality gate.
 **Files.** `apps/web/src/app/error.tsx`, `.github/workflows/ci.yml`
 **Dependencies.** F1-01, F1-02
-**Implementation.** Per-region error boundaries showing real errors; GitHub Actions running typecheck, lint, test and build for both stacks on push and PR.
+**Implementation.** A root route boundary plus a reusable `RegionErrorBoundary` so a failing panel does not take down the session; both show the real error and a recovery action. GitHub Actions running typecheck, lint and test for both stacks and build for the web tier on push and PR, plus a credential scan.
 **Acceptance criteria.** CI fails on a deliberately broken type; error boundary shows the real message and a recovery action.
-**Tests.** RTL test forcing a render error; CI green on `main`.
+**Tests.** RTL tests forcing a render error in a region boundary: real message shown, region named, failure isolated from siblings, and recovery re-rendering a transient fault. CI green on `main`.
 **Security.** CI must not echo secrets; no secrets required for the default job.
 **Status.** `PENDING`
 

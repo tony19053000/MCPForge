@@ -25,13 +25,13 @@ export default function GlobalError({
 
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-lg rounded-[--radius-card] border border-danger bg-surface p-6">
+      <div className="w-full max-w-lg rounded-card border border-danger bg-surface p-6">
         <h1 className="text-lg font-semibold text-text">This view failed to render</h1>
         <p className="mt-2 text-sm text-muted">
           The rest of the application is unaffected. The error is shown in full so it can be
           reported or debugged.
         </p>
-        <pre className="mt-4 overflow-x-auto rounded-[--radius-control] bg-surface-sunken p-3 font-mono text-xs text-text">
+        <pre className="mt-4 overflow-x-auto rounded-control bg-surface-sunken p-3 font-mono text-xs text-text">
           {error.message}
           {error.digest ? `\n\ndigest: ${error.digest}` : ""}
         </pre>

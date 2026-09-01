@@ -66,3 +66,46 @@ def test_invalid_enum_value_is_a_validation_error() -> None:
 def test_cors_origins_are_split_and_trimmed() -> None:
     s = Settings(api_cors_origins="http://a.test , http://b.test")
     assert s.cors_origins == ["http://a.test", "http://b.test"]
+
+
+def test_startup_aborts_when_production_configuration_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real startup path must abort, not just the invariant helper — F1-03.
+
+    get_settings() is what main.py calls, and it is cached, so this exercises the
+    path that actually runs when the process boots.
+    """
+    from mcpforge import config as config_module
+
+    for var in ("FIREBASE_PROJECT_ID", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("MCPFORGE_ENV", "production")
+    monkeypatch.setitem(config_module.Settings.model_config, "env_file", None)
+    config_module.get_settings.cache_clear()
+
+    try:
+        with pytest.raises(ConfigError) as exc:
+            config_module.get_settings()
+    finally:
+        config_module.get_settings.cache_clear()
+
+    message = str(exc.value)
+    assert "FIREBASE_PROJECT_ID" in message
+    assert "GEMINI_API_KEY" in message
+
+
+def test_startup_succeeds_in_development_without_optional_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Development must not require credentials — but it must not fake them either."""
+    from mcpforge import config as config_module
+
+    monkeypatch.setenv("MCPFORGE_ENV", "development")
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    config_module.get_settings.cache_clear()
+    try:
+        settings = config_module.get_settings()
+        assert settings.auth_configured is False
+    finally:
+        config_module.get_settings.cache_clear()

@@ -11,6 +11,7 @@ See 02_ARCHITECTURE.md §3.2 and 03_SECURITY_ACCESS.md §9.
 
 from __future__ import annotations
 
+import anyio.to_thread
 import jwt
 from jwt import PyJWKClient
 
@@ -56,8 +57,12 @@ class FirebaseIdTokenVerifier:
         if not raw_token or not raw_token.strip():
             raise AuthError("Empty bearer token")
 
+        # PyJWKClient fetches over the network on a cache miss or key rotation.
+        # That call is synchronous, so it runs on a worker thread rather than
+        # stalling the event loop for every request that arrives during a fetch.
+        client = self._jwks_client
         try:
-            signing_key = self._jwks_client.get_signing_key_from_jwt(raw_token)
+            signing_key = await anyio.to_thread.run_sync(client.get_signing_key_from_jwt, raw_token)
         except Exception as exc:  # PyJWKClient raises several unrelated types
             raise AuthError(f"Could not resolve signing key: {exc}") from exc
 

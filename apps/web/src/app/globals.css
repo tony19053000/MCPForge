@@ -6,8 +6,8 @@
  * Ground is near-neutral, never pure black or pure white. One restrained
  * forge-warm accent carries action and progress.
  *
- * Every pairing used for text or interactive elements meets WCAG AA. The
- * contrast table in src/lib/theme/contrast.test.ts asserts this, so a token
+ * Every pairing used for text or interactive elements meets WCAG AA.
+ * tests/contrast.test.ts parses THIS FILE and asserts the ratios, so a colour
  * cannot be changed to something unreadable without a test failing.
  */
 

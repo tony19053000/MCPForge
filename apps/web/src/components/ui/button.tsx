@@ -40,7 +40,7 @@ export function Button({
       aria-disabled={disabled || undefined}
       title={disabled ? disabledReason : undefined}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-[--radius-control] font-medium",
+        "inline-flex items-center justify-center gap-2 rounded-control font-medium",
         "transition-colors duration-150",
         "disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant],

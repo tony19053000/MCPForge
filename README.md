@@ -2,8 +2,8 @@
 
 **An AI-native developer workspace that analyzes developer-controlled web applications and helps transform them into safe, testable, WebMCP-compatible applications.**
 
-> **Project status: Phase 0 of 9 — foundation only.**
-> This repository currently contains the product, architecture, security and UI specifications plus the engineering process. **No application code has been written yet.** Nothing below describes a working feature unless `STATUS.md` says it is done.
+> **Project status: Phase 1 of 9 — application foundation.**
+> Both tiers now build, typecheck, lint and test cleanly, with authentication, environment validation, the design system and the workspace shell in place. **The pipeline below is not implemented yet** — repository analysis, tool generation, security review and pull-request creation all arrive in Phases 3–6. Nothing here describes a working feature unless `STATUS.md` says it is done.
 
 ---
 
@@ -59,13 +59,24 @@ No agent orchestration framework. The orchestration layer is ours and it is dete
 
 ## Getting started
 
-Not yet runnable — Phase 1 builds the application skeleton. When it exists:
-
 ```bash
 cp .env.example .env     # fill in real values; never commit .env
 npm install
-npm run dev              # web
-npm run api:dev          # backend
+npm run dev              # web  → http://localhost:3000
+npm run api:dev          # api  → http://localhost:8000
+```
+
+Server-side Google access uses Application Default Credentials, so run
+`gcloud auth application-default login` once. There are no service-account key
+files, and none are supported.
+
+Verification, all of which must pass before anything is committed:
+
+```bash
+npm run typecheck   # web tsc + api mypy (strict)
+npm run lint        # eslint + ruff
+npm run test        # vitest + pytest
+npm run build       # web only — Python has no build step
 ```
 
 ## Documentation

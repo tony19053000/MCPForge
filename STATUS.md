@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**10%** — Phase 0 complete, verified by `[REVIEWER / TESTER]` and committed.
+**10%** — Phase 1 implemented and under review. Advances to 20% only on a `[REVIEWER / TESTER]` PASS.
 
 ## Current phase
 
-**Phase 1 — Application Foundation (10% → 20%)** — not yet started.
+**Phase 1 — Application Foundation (10% → 20%)** — in review.
 
 ## Current ticket
 
-`F1-01` — Next.js application scaffold — `PENDING`
+`F1-01`..`F1-07` — `IN_REVIEW`
 
 ---
 
@@ -30,7 +30,15 @@
 
 ## In progress
 
-None.
+| Ticket | Title | Status |
+|---|---|---|
+| F1-01 | Next.js application scaffold | `IN_REVIEW` |
+| F1-02 | FastAPI service scaffold | `IN_REVIEW` |
+| F1-03 | Environment validation | `IN_REVIEW` |
+| F1-04 | Design system foundation | `IN_REVIEW` |
+| F1-05 | Application shell and landing page | `IN_REVIEW` |
+| F1-06 | Auth abstraction and provisional Firebase wiring | `IN_REVIEW` |
+| F1-07 | Error boundaries and CI baseline | `IN_REVIEW` |
 
 ## Pending
 
@@ -58,14 +66,12 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | Not applicable yet — no code |
-| Integration | Not applicable yet |
-| E2E | Not applicable yet |
-| Build | Not applicable yet |
-| Lint | Not applicable yet |
-| Typecheck | Not applicable yet |
-
-Phase 0 verification was a documentation consistency review, not a test run. No test command has been run because no code exists.
+| Unit | **119 passing** — 71 web (Vitest), 48 API (pytest) |
+| Integration | Covered within the suites above: FastAPI routes exercised over ASGI transport with real RS256 tokens |
+| E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
+| Build | `npm run build` clean (web only — Python has no build step) |
+| Lint | `eslint` clean; `ruff check` and `ruff format --check` clean |
+| Typecheck | `tsc --noEmit` clean under strict; `mypy` strict clean |
 
 ---
 
@@ -81,15 +87,16 @@ Phase 0 verification was a documentation consistency review, not a test run. No 
 | Credentials in repository | None. `.env` ignored; `.env.example` contains names only |
 | Service-account keys | None, by design. Not created, not committed, not a supported configuration. Server-side Google access uses ADC |
 | Auth posture | Provisional Firebase Auth behind a `TokenVerifier` / `AuthProvider` port pair. Backend imports no Firebase SDK and needs no credentials to verify a token |
-| Banned dependencies | None installed — no dependencies installed at all |
+| Banned dependencies | None present. Verified absent: LangChain, LlamaIndex, CrewAI, AutoGen, `google-generativeai`. Also absent by design: `firebase-admin` |
+| Attestation claims | `/healthz` reports `hardware_attested: false` as a literal with no assignment path |
 
 ---
 
 ## Latest Git commit
 
-`14307517812b75469504f89b47b31e5221defc6b` — `docs: establish MCPForge product and engineering foundation`
+`f744be7` — `feat: application foundation — web and API tiers with real gates`
 
-Working tree clean at commit time. Push status is recorded in blocker table row B-05 if it did not succeed.
+Preceded by `06cb62b` (auth decision), `49e0162` and `1430751` (Phase 0). Fixes from the Phase 1 review follow in a subsequent commit.
 
 ---
 
