@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     google_cloud_quota_project: str | None = None
     google_cloud_location: str = "us-central1"
 
+    # GitHub App. The private key path points outside the repository, and the
+    # key is read at use time and never persisted or logged.
+    github_app_id: str | None = None
+    github_app_client_id: str | None = None
+    github_app_client_secret: str | None = None
+    github_app_private_key_path: str | None = None
+
     secure_executor: SecureExecutorKind = SecureExecutorKind.DEVELOPMENT
     workspace_root: str = "/tmp/mcpforge-workspaces"  # noqa: S108
     job_timeout_seconds: int = 600
@@ -105,6 +112,11 @@ class Settings(BaseSettings):
     def auth_configured(self) -> bool:
         """Whether identity verification can actually run. Never assumed true."""
         return bool(self.firebase_project_id)
+
+    @property
+    def github_configured(self) -> bool:
+        """Whether repository access can actually be requested. Never assumed."""
+        return bool(self.github_app_id and self.github_app_private_key_path)
 
     @property
     def gemini_configured(self) -> bool:
