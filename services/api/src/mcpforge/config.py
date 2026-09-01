@@ -21,6 +21,18 @@ class Environment(StrEnum):
     PRODUCTION = "production"
 
 
+class GeminiBackend(StrEnum):
+    """How the Gemini SDK authenticates.
+
+    `API_KEY` uses a key from Google AI Studio. `VERTEX` uses Application
+    Default Credentials against a GCP project, which needs no secret at all —
+    the preferred path where organization policy restricts key material.
+    """
+
+    API_KEY = "api_key"
+    VERTEX = "vertex"
+
+
 class SecureExecutorKind(StrEnum):
     DEVELOPMENT = "development"
     CONFIDENTIAL_SPACE = "confidential_space"
@@ -32,7 +44,8 @@ class ConfigError(RuntimeError):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Repo-root .env first, then a service-local override if one exists.
+        env_file=("../../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -45,11 +58,14 @@ class Settings(BaseSettings):
     api_port: int = 8000
     api_cors_origins: str = "http://localhost:3000"
 
-    # Gemini — optional until Phase 2. Absent means "unconfigured", never a stub.
+    # Gemini. Absent means "unconfigured", never a stub.
+    gemini_backend: GeminiBackend = GeminiBackend.API_KEY
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.7-flash"
     gemini_timeout_seconds: int = 120
     gemini_max_retries: int = 2
+    # Base for exponential backoff. Set to 0 in tests so retries do not sleep.
+    gemini_retry_base_delay_seconds: float = 1.0
 
     # Identity. Provisional Firebase Auth (02_ARCHITECTURE.md §3.2).
     # Verification needs no credentials — only the project id, to derive the
@@ -60,6 +76,7 @@ class Settings(BaseSettings):
     # setting for a service-account key path: key files are unsupported.
     google_cloud_project: str | None = None
     google_cloud_quota_project: str | None = None
+    google_cloud_location: str = "us-central1"
 
     secure_executor: SecureExecutorKind = SecureExecutorKind.DEVELOPMENT
     workspace_root: str = "/tmp/mcpforge-workspaces"  # noqa: S108
@@ -91,6 +108,13 @@ class Settings(BaseSettings):
 
     @property
     def gemini_configured(self) -> bool:
+        """Whether a real model call can be made. Never assumed true.
+
+        The API-key backend needs a key; the Vertex backend needs a project and
+        relies on ambient Application Default Credentials.
+        """
+        if self.gemini_backend is GeminiBackend.VERTEX:
+            return bool(self.google_cloud_project)
         return bool(self.gemini_api_key)
 
     def require_production_invariants(self) -> None:
@@ -102,8 +126,12 @@ class Settings(BaseSettings):
         missing: list[str] = []
         if not self.firebase_project_id:
             missing.append("FIREBASE_PROJECT_ID")
-        if not self.gemini_api_key:
-            missing.append("GEMINI_API_KEY")
+        if not self.gemini_configured:
+            missing.append(
+                "GOOGLE_CLOUD_PROJECT (GEMINI_BACKEND=vertex)"
+                if self.gemini_backend is GeminiBackend.VERTEX
+                else "GEMINI_API_KEY"
+            )
         if missing:
             raise ConfigError(
                 "Missing required configuration for production: "
