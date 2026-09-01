@@ -7,7 +7,10 @@ between adapters.
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Iterator
+from uuid import uuid4
 
 import pytest
 
@@ -24,20 +27,60 @@ from mcpforge.models.core import (
 )
 from mcpforge.store.memory import InMemoryStore
 from mcpforge.store.port import NotFoundError, Store
+from tests.structure import SRC, code_lines, files_importing
 
+# Owner ids are unique per test. The in-memory adapter starts empty every time,
+# but Firestore is persistent: with a fixed owner id, documents from earlier
+# tests and earlier runs would accumulate and list_projects would keep growing.
+# The shared suite surfaced that difference, which is the point of running one
+# suite against both adapters.
 OWNER = "uid-owner"
 OTHER = "uid-stranger"
 
 
-@pytest.fixture(params=["memory"])
+@pytest.fixture(autouse=True)
+def unique_identities(monkeypatch: pytest.MonkeyPatch) -> None:
+    run = uuid4().hex[:12]
+    monkeypatch.setattr(sys.modules[__name__], "OWNER", f"uid-owner-{run}")
+    monkeypatch.setattr(sys.modules[__name__], "OTHER", f"uid-stranger-{run}")
+
+
+#: Every adapter runs this same suite, unchanged. Firestore is opt-in because it
+#: needs a real database: MCPFORGE_TEST_FIRESTORE=1 with ADC configured.
+ADAPTERS = ["memory"]
+if os.environ.get("MCPFORGE_TEST_FIRESTORE") == "1":
+    ADAPTERS.append("firestore")
+
+
+@pytest.fixture(params=ADAPTERS)
 def store(request: pytest.FixtureRequest) -> Iterator[Store]:
     if request.param == "memory":
         yield InMemoryStore()
-    else:  # pragma: no cover - added with the Firestore adapter
-        raise AssertionError(f"unknown adapter {request.param}")
+        return
+
+    if request.param == "firestore":
+        from mcpforge.store.firestore import FirestoreStore
+
+        # Read from a dedicated variable: the isolation fixture in conftest
+        # deliberately clears FIREBASE_PROJECT_ID so no test inherits local
+        # configuration, and that applies here too.
+        project_id = os.environ.get("MCPFORGE_TEST_FIRESTORE_PROJECT")
+        assert project_id, (
+            "Set MCPFORGE_TEST_FIRESTORE_PROJECT to the Firebase project id "
+            "when running the Firestore adapter tests"
+        )
+        # Documents are namespaced per run by the ids the models generate, so
+        # concurrent runs cannot collide.
+        yield FirestoreStore(project_id)
+        return
+
+    raise AssertionError(f"unknown adapter {request.param}")
 
 
-async def make_session(store: Store, owner: str = OWNER) -> tuple[Project, Session]:
+async def make_session(store: Store, owner: str | None = None) -> tuple[Project, Session]:
+    # Read OWNER at call time, not as a default: defaults bind at import, which
+    # would defeat the per-test identity fixture above.
+    owner = owner or OWNER
     project = await store.create_project(Project(owner_uid=owner, name="hotel app"))
     session = await store.create_session(Session(project_id=project.id, owner_uid=owner))
     return project, session
@@ -215,3 +258,35 @@ async def test_another_user_cannot_look_up_an_approval(store: Store) -> None:
     )
     with pytest.raises(NotFoundError):
         await store.get_approval(approval.id, OTHER)
+
+
+def test_no_firestore_sdk_is_imported_outside_its_adapter() -> None:
+    """The store can move from in-memory to Firestore without touching anything
+    above it. That only holds if the SDK stays inside its own adapter."""
+    offenders = files_importing(
+        ("google.cloud", "google.cloud.firestore"), exclude=("firestore.py",)
+    )
+    assert not offenders, "Firestore SDK imported outside its adapter:\n" + "\n".join(offenders)
+
+
+def test_the_firestore_adapter_uses_no_service_account_key() -> None:
+    """03_SECURITY_ACCESS.md §9 — ADC only, no key file, anywhere."""
+    adapter = SRC / "mcpforge" / "store" / "firestore.py"
+    banned = ("GOOGLE_APPLICATION_CREDENTIALS", "from_service_account", "service_account_json")
+    offenders = [
+        f"{adapter.name}:{lineno}: {code}"
+        for lineno, code in code_lines(adapter)
+        for term in banned
+        if term in code
+    ]
+    assert not offenders, "key material referenced:\n" + "\n".join(offenders)
+
+
+def test_ownership_is_filtered_in_the_query_not_after_the_fetch() -> None:
+    """A mis-scoped read must return nothing, rather than returning another
+    user's document and relying on us to drop it afterwards."""
+    adapter = SRC / "mcpforge" / "store" / "firestore.py"
+    code = "\n".join(line for _, line in code_lines(adapter))
+    assert 'FieldFilter("owner_uid", "==", owner_uid)' in code, (
+        "list_projects must filter by owner in the Firestore query"
+    )

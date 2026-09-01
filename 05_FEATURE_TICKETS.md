@@ -269,9 +269,9 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Dependencies.** F2-02
 **Implementation.** Firestore adapter using Application Default Credentials — no service-account key. Added to the conformance suite's adapter params so it must pass the same suite as the in-memory adapter, unchanged.
 **Acceptance criteria.** Both adapters pass one shared conformance suite; ownership is enforced in the query, not filtered after the fetch; no Firestore type leaks past the port; a demo project and a real project behave identically.
-**Tests.** The full conformance suite against a Firestore emulator in CI, and against a real database once provisioned. A test asserting no `google.cloud.firestore` import outside the adapter.
+**Tests.** The full conformance suite against a real database, opt-in via `MCPFORGE_TEST_FIRESTORE=1` and `MCPFORGE_TEST_FIRESTORE_PROJECT` so CI stays credential-free. AST-based tests assert no `google.cloud` import outside the adapter, no key material in it, and that ownership is filtered in the query.
 **Security.** Uses ADC (`03_SECURITY_ACCESS.md` §9). Ownership filtering happens server-side in the query so a mis-scoped read cannot return another user's document.
-**Status.** `PENDING`
+**Status.** `DONE` — verified against the live `mcpforge-aa5c2` database: 33 tests pass, the same suite the in-memory adapter passes.
 
 ---
 
