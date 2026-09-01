@@ -12,14 +12,15 @@
   },
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
-    "typecheck": "npm run typecheck --workspaces --if-present && npm run api:typecheck",
-    "lint": "npm run lint --workspaces --if-present && npm run api:lint",
-    "test": "npm run test --workspaces --if-present && npm run api:test",
-    "build": "npm run build --workspaces --if-present",
-    "test:e2e": "npm run test:e2e --workspace=apps/web --if-present",
     "api:dev": "cd services/api && uv run uvicorn mcpforge.main:app --reload",
-    "api:typecheck": "cd services/api && uv run mypy src",
-    "api:lint": "cd services/api && uv run ruff check .",
-    "api:test": "cd services/api && uv run pytest"
+    "typecheck": "npm run typecheck --workspace=apps/web && npm run api:typecheck",
+    "lint": "npm run lint --workspace=apps/web && npm run api:lint",
+    "test": "npm run test --workspace=apps/web && npm run api:test",
+    "build": "npm run build --workspace=apps/web",
+    "test:e2e": "npm run test:e2e --workspace=apps/web",
+    "format": "cd services/api && uv run ruff format .",
+    "api:typecheck": "cd services/api && uv run mypy",
+    "api:lint": "cd services/api && uv run ruff check . && uv run ruff format --check .",
+    "api:test": "cd services/api && uv run pytest -q"
   }
 }

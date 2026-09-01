@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+/*
+ * MCPForge design tokens — 04_FRONTEND_SPEC.md §1.
+ * Dark-first, with a fully supported light theme. Neither is an afterthought.
+ * Ground is near-neutral, never pure black or pure white. One restrained
+ * forge-warm accent carries action and progress.
+ *
+ * Every pairing used for text or interactive elements meets WCAG AA. The
+ * contrast table in src/lib/theme/contrast.test.ts asserts this, so a token
+ * cannot be changed to something unreadable without a test failing.
+ */
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
+
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+}
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Ground */
+  --ground: #faf9f7;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f2f0ed;
+  --overlay: rgb(28 25 23 / 0.45);
+
+  /* Line */
+  --border: #e0dcd6;
+  --border-strong: #8f8880;
+
+  /* Text */
+  --text: #1c1917;
+  --text-muted: #57534e;
+  --text-subtle: #78716c;
+  --text-inverted: #fafaf9;
+
+  /* Accent — forge-warm ember */
+  --accent: #b45309;
+  --accent-hover: #92400e;
+  --accent-subtle: #fef3c7;
+  --accent-text: #ffffff;
+
+  /* Semantic */
+  --success: #15803d;
+  --success-subtle: #dcfce7;
+  --warning: #a16207;
+  --warning-subtle: #fef9c3;
+  --danger: #b91c1c;
+  --danger-subtle: #fee2e2;
+
+  /* Awaiting-you: a distinct state for approvals, not reused for anything else */
+  --pending: #6d28d9;
+  --pending-subtle: #ede9fe;
+
+  --focus: #0369a1;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ground: #121110;
+  --surface: #1a1817;
+  --surface-raised: #232120;
+  --surface-sunken: #0d0c0b;
+  --overlay: rgb(0 0 0 / 0.6);
+
+  --border: #322e2c;
+  --border-strong: #736c66;
+
+  --text: #f5f3f1;
+  --text-muted: #b3aca7;
+  --text-subtle: #8a827d;
+  --text-inverted: #1c1917;
+
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --accent-subtle: #3b2a10;
+  --accent-text: #1c1917;
+
+  --success: #4ade80;
+  --success-subtle: #14301f;
+  --warning: #fbbf24;
+  --warning-subtle: #35290d;
+  --danger: #f87171;
+  --danger-subtle: #3b1717;
+
+  --pending: #c4b5fd;
+  --pending-subtle: #291f45;
+
+  --focus: #7dd3fc;
+}
+
+/* Expose the tokens to Tailwind utilities: bg-surface, text-muted, border-strong... */
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-inverted: var(--text-inverted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-text: var(--accent-text);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-pending: var(--pending);
+  --color-pending-subtle: var(--pending-subtle);
+  --color-focus: var(--focus);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    height: 100%;
+  }
+
+  body {
+    min-height: 100%;
+    background-color: var(--ground);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Focus is always visible. Never remove this without replacing it. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--accent-subtle);
+    color: var(--text);
+  }
+}
+
+/* Motion is functional. When the user asks for less of it, they get none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

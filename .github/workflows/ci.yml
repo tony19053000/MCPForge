@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# No secrets are required for these jobs. A check that needs a credential to
+# pass is a check that cannot run on a fork, so it does not belong here.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (typecheck · lint · test · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck --workspace=apps/web
+      - run: npm run lint --workspace=apps/web
+      - run: npm run test --workspace=apps/web
+      - run: npm run build --workspace=apps/web
+
+  api:
+    name: API (ruff · mypy · pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest -q
+
+  secrets:
+    name: No credentials in the tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan tracked files for credential-shaped strings
+        run: |
+          if git grep -InE \
+            'AIza[0-9A-Za-z_-]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}' \
+            -- . ':!.github/workflows/ci.yml' ':!services/api/tests'; then
+            echo "::error::Credential-shaped string found in a tracked file"
+            exit 1
+          fi
+          echo "No credential-shaped strings found."
+      - name: Refuse a committed .env
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked"
+            exit 1
+          fi
+          echo ".env is not tracked."
