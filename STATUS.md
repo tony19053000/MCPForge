@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**10%** — Phase 1 implemented and under review. Advances to 20% only on a `[REVIEWER / TESTER]` PASS.
+**20%** — Phase 1 complete, verified by `[REVIEWER / TESTER]` on round 3.
 
 ## Current phase
 
-**Phase 1 — Application Foundation (10% → 20%)** — in review.
+**Phase 2 — AI Workspace + Gemini (20% → 30%)** — not yet started.
 
 ## Current ticket
 
-`F1-01`..`F1-07` — `IN_REVIEW`
+`F2-01` — Gemini provider — `PENDING`
 
 ---
 
@@ -27,22 +27,21 @@
 | F0-03 | Anchor documentation set | PASS (round 4) |
 | F0-04 | CLAUDE.md and STATUS.md | PASS (round 4) |
 | F0-05 | Phase 0 review gate and commit | PASS (round 4) |
+| F1-01 | Next.js application scaffold | PASS (round 3) |
+| F1-02 | FastAPI service scaffold | PASS (round 3) |
+| F1-03 | Environment validation | PASS (round 3) |
+| F1-04 | Design system foundation | PASS (round 3) |
+| F1-05 | Application shell and landing page | PASS (round 3) |
+| F1-06 | Auth abstraction and provisional Firebase wiring | PASS (round 3) |
+| F1-07 | Error boundaries and CI baseline | PASS (round 3) |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F1-01 | Next.js application scaffold | `IN_REVIEW` |
-| F1-02 | FastAPI service scaffold | `IN_REVIEW` |
-| F1-03 | Environment validation | `IN_REVIEW` |
-| F1-04 | Design system foundation | `IN_REVIEW` |
-| F1-05 | Application shell and landing page | `IN_REVIEW` |
-| F1-06 | Auth abstraction and provisional Firebase wiring | `IN_REVIEW` |
-| F1-07 | Error boundaries and CI baseline | `IN_REVIEW` |
+None.
 
 ## Pending
 
-Phases 1–9, tickets `F1-01` through `F9-05`. See `05_FEATURE_TICKETS.md`.
+Phases 2–9, tickets `F2-01` through `F9-05`. See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -80,6 +79,8 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Control | State |
 |---|---|
 | Secure execution | Not implemented. Target for Phase 3 is `DEVELOPMENT_ISOLATION` |
+| Client bundle | Verified free of `NEXT_PUBLIC_` values and any credential material |
+| Auth enforcement | Server-side on every authenticated route; RS256 pinned; `alg:none`, expired, wrong-issuer, wrong-audience and forged tokens all rejected by test |
 | Attestation | **Not implemented, not simulated.** `HARDWARE_ATTESTED` is unreachable |
 | Secret filtering | Specified (`03_SECURITY_ACCESS.md` §4), not implemented |
 | Repository access mode | Not implemented. Default will be `READ_ONLY` |
@@ -94,9 +95,9 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`f744be7` — `feat: application foundation — web and API tiers with real gates`
+`7754003` — `fix: clear round-2 review findings`
 
-Preceded by `06cb62b` (auth decision), `49e0162` and `1430751` (Phase 0). Fixes from the Phase 1 review follow in a subsequent commit.
+Phase 1 spans `f744be7` (implementation), `16c8897` (round-1 fixes) and `7754003` (round-2 fixes), preceded by `06cb62b` (auth decision) and the Phase 0 commits `1430751` and `49e0162`.
 
 ---
 
@@ -172,3 +173,29 @@ Files introduced:
 **Unresolved.** Final production auth (Firebase Auth vs direct Google OAuth) is deliberately undecided and is not a blocker. Deployment target is likely Vercel for the web tier; the Python service's hosting is not yet decided and is not needed until Phase 2.
 
 **Next intended task.** `F1-01` — Next.js application scaffold.
+
+### 0003 — Phase 1: Application foundation
+
+**What was built.** Both tiers, with real gates and no stubbed AI.
+
+- `apps/web` — Next.js 16 App Router, React 19, Tailwind v4, TypeScript strict (plus `noUncheckedIndexedAccess`). Design tokens for both themes, UI primitives, three-region workspace shell with an icon rail and modal drawers, landing page, pre-paint theme init, root and per-region error boundaries, `AuthProvider` port with a Firebase adapter, public env validation.
+- `services/api` — Python 3.12, FastAPI, Pydantic v2, `uv`. Config that fails fast, `TokenVerifier` port with a credential-free Firebase JWKS verifier, structured logging with redaction, `/healthz` reporting real capability state.
+- CI runs both stacks plus a credential scan and a check that `.env` is untracked.
+
+**122 tests** — 74 web (Vitest/RTL), 48 API (pytest). typecheck, lint, test and build all clean.
+
+**Decisions worth keeping.**
+
+1. **Ports are enforced by test, not by convention.** The backend imports no vendor SDK and reads no key path; a second `TokenVerifier` and a second `AuthProvider` both satisfy their ports and the API works with one. Identity carries no repository authority, and a token claiming repository scopes grants none. These tests are the reason the eventual swap to direct Google OAuth stays a one-adapter change — do not delete them as redundant.
+2. **The contrast test parses `globals.css` itself**, not a mirror, so a colour cannot become unreadable without failing. It caught a real defect during Phase 1: `--border-strong` failed 3:1 in both themes and was recomputed rather than waived.
+3. **`css-syntax.test.ts` exists because one mistake shipped twice.** Tailwind v3's `x-[--token]` syntax compiles to invalid CSS under v4 with no build, lint or type error — the style simply does not apply. It reached the tree twice before becoming a test. Both that test and the contrast test guard themselves against passing vacuously.
+4. **Tailwind source detection is scoped to `src/`** (`source(none)` + `@source "../"`), because tests contain deliberately-wrong example class strings that were generating dead utilities. A future source root outside `src/` will need its own `@source` line — noted in `globals.css`.
+5. **Development never fakes credentials.** `UnconfiguredAuthProvider` refuses honestly; an unconfigured deployment returns 503, distinct from a 401 for a bad token; a provider cannot be enabled without the config to run it. There is no dev bypass anywhere, asserted by test.
+
+**Review record.** Round 1 `FAIL` (14 defects, including a functional Tailwind v4 bug that made every primitive render square, and a responsive shell that made approvals unreachable on tablet). Round 2 `FAIL` (3 defects, one of which was the same Tailwind bug reintroduced inside its own fix). Round 3 `PASS`, with every new suite mutation-tested by the reviewer and none found vacuous.
+
+**What NOT to change accidentally.** The two auth ports and their boundary tests. The credential-free verification path. `hardware_attested` as a literal with no assignment path. The self-guarding structure of the contrast and CSS-syntax tests.
+
+**Unresolved.** Blockers B-01 (no `GEMINI_API_KEY`) and B-03 (no GitHub App) remain open and are now on the critical path for Phases 2 and 3. Firebase sign-in is wired but untested against the live project, since no credentials are configured in this environment.
+
+**Next intended task.** `F2-01` — Gemini provider over `google-genai`, with `generate_structured` re-validating model output against the Pydantic schema on our side.

@@ -72,7 +72,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** `npm run dev` serves; `npm run build` succeeds; `npm run typecheck` clean under `strict`; no unused template assets.
 **Tests.** Vitest configured with one real passing test; build in CI.
 **Security.** No secret in client config; verify the client bundle contains no non-`NEXT_PUBLIC_` variable.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F1-02 — FastAPI service scaffold
 **Purpose.** Stand up the backend tier.
@@ -82,7 +82,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** `uv run pytest` passes; `uv run mypy` clean; `uv run ruff check` clean; `/healthz` returns real service state.
 **Tests.** pytest with httpx ASGI transport hitting `/healthz`.
 **Security.** Logging redaction in place from the first commit.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F1-03 — Environment validation
 **Purpose.** Fail fast and loudly on misconfiguration; never silently disable security.
@@ -92,7 +92,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Missing required var → process exits with a message naming the variable; unconfigured optional integration is reported as unconfigured, never faked.
 **Tests.** Unit tests for missing/invalid/valid configurations.
 **Security.** No default value may weaken a security control.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F1-04 — Design system foundation
 **Purpose.** The visual language from `04_FRONTEND_SPEC.md`.
@@ -102,7 +102,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Both themes pass WCAG AA on text and interactive elements; focus visible everywhere; `prefers-reduced-motion` respected.
 **Tests.** RTL tests for primitives; contrast values asserted in a unit test against the token table.
 **Security.** none specific.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F1-05 — Application shell and landing page
 **Purpose.** The three-region workspace and public entry point.
@@ -112,7 +112,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Layout correct at desktop/tablet/mobile breakpoints; no horizontal overflow; landing copy claims nothing unbuilt.
 **Tests.** RTL tests for the three regions, the icon rail, the drawer (open, Escape, close) and region omission. Playwright viewport smoke tests are deferred to `F9-03`, where Playwright is introduced — no `test:e2e` script exists until then, rather than one that fails.
 **Security.** none specific.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F1-06 — Auth abstraction and provisional Firebase wiring
 **Purpose.** Identity today, replaceable tomorrow. Firebase Auth is the current implementation, not the decided architecture — see `02_ARCHITECTURE.md` §3.2.
@@ -122,7 +122,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Google sign-in works end to end; unconfigured providers are visibly disabled, never fake; the backend rejects missing, malformed, expired, wrong-issuer and wrong-audience tokens; identity is never taken from a request body; **no Firebase type crosses either port** — the backend's `VerifiedIdentity` and the web's `Session` are ours; the backend imports no Firebase SDK; no code path reads a service-account key file.
 **Tests.** Verifier unit tests for valid, expired, wrong-audience, wrong-issuer, malformed and unsigned tokens against a locally generated key pair; a test asserting `firebase` appears in no backend import; RTL test that disabled providers are not clickable; a swap test constructing a second `TokenVerifier` to prove the port is genuinely provider-agnostic.
 **Security.** MCPForge identity must be distinct from GitHub repository authorization — asserted by test. Token verification happens server-side on every authenticated request; a client-supplied identity is never trusted.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F1-07 — Error boundaries and CI baseline
 **Purpose.** Contained failure and an enforced quality gate.
@@ -132,7 +132,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** CI fails on a deliberately broken type; error boundary shows the real message and a recovery action.
 **Tests.** RTL tests forcing a render error in a region boundary: real message shown, region named, failure isolated from siblings, and recovery re-rendering a transient fault. CI green on `main`.
 **Security.** CI must not echo secrets; no secrets required for the default job.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ---
 

@@ -68,7 +68,7 @@ MCPForge/
 │       │   ├── orchestration/  state machine, run loop, events
 │       │   ├── gemini/         provider abstraction over google-genai
 │       │   ├── indexing/       repository index pipeline
-│       │   ├── security/      secret filter, path policy, prompt-context redaction
+│       │   ├── security/       secret filter, path policy, prompt-context redaction
 │       │   ├── generation/     patch generation + framework adapters
 │       │   ├── github/         GitHub App client, branch + PR writer
 │       │   ├── execution/      SecureExecutionProvider implementations

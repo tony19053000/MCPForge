@@ -3,6 +3,10 @@
 /*
  * Scan application source only. Tests contain example class strings — including
  * deliberately wrong ones — and must not generate utilities in the bundle.
+ *
+ * NOTE: source(none) disables auto-detection, so a source root added OUTSIDE
+ * src/ (a shared workspace package, a second app) will silently produce no
+ * utilities with no error. Add an @source line for it here when that happens.
  */
 @source "../";
 
