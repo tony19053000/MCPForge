@@ -18,7 +18,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Repository initialized on `main`; `git status` clean after commit; no `.env` tracked; `.env.example` contains zero real values; README states the stack and the Phase 0 status honestly.
 **Tests.** Manual: `git check-ignore -v .env` matches; grep for secret-shaped strings in tracked files returns nothing.
 **Security.** No credential may enter the initial commit.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F0-02 — Claude Code development subagents
 **Purpose.** Encode the two-role development process so future sessions cannot skip the review gate.
@@ -28,7 +28,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Both files exist with valid frontmatter; CODER's constraints include the security rules and the ban on self-approval; REVIEWER's procedure includes running typecheck/lint/test/build and hunting for fake implementations.
 **Tests.** Manual review for contradiction against `03_SECURITY_ACCESS.md`.
 **Security.** Agent definitions must not grant the reviewer broad write capability.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F0-03 — Anchor documentation set
 **Purpose.** Fix product, architecture, security and UI intent before implementation.
@@ -38,7 +38,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** No contradiction between documents on stack, model SDK, WebMCP API surface, trust levels, approval semantics, or MVP scope; MVP vs future clearly separated; no claimed capability that does not exist.
 **Tests.** REVIEWER cross-document consistency pass.
 **Security.** Security document must be binding, not aspirational.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F0-04 — CLAUDE.md and STATUS.md
 **Purpose.** Give future sessions their entry point and a truthful project dashboard.
@@ -48,7 +48,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** `STATUS.md` reflects reality exactly; percentage advances only after a PASS.
 **Tests.** REVIEWER confirms STATUS claims match repository state.
 **Security.** none specific.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F0-05 — Phase 0 review gate and commit
 **Purpose.** Prove the foundation before any code is written.
@@ -58,7 +58,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** REVIEWER returns PASS on the documentation set; a single clean commit; `git status` clean afterwards; push succeeds or the blocker is recorded verbatim in `STATUS.md`.
 **Tests.** Not a code ticket. Verification is the reviewer's checklist plus `git status`, `git check-ignore -v .env`, and a secret-shaped grep over tracked files.
 **Security.** No credential may enter the initial commit — verified by grep over all tracked files before committing.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ---
 

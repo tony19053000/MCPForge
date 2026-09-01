@@ -6,31 +6,31 @@
 
 ## Overall completion
 
-**0%** — Phase 0 authored, under review. The percentage advances to 10% only when `[REVIEWER / TESTER]` returns `PASS` and the work is committed.
+**10%** — Phase 0 complete, verified by `[REVIEWER / TESTER]` and committed.
 
 ## Current phase
 
-**Phase 0 — Project Anchoring (0% → 10%)** — in review.
+**Phase 1 — Application Foundation (10% → 20%)** — not yet started.
 
 ## Current ticket
 
-`F0-05` — Phase 0 review gate and commit — `IN_REVIEW`
+`F1-01` — Next.js application scaffold — `PENDING`
 
 ---
 
 ## Completed
 
-None yet. No ticket is `DONE` until the review gate passes.
+| Ticket | Title | Verified |
+|---|---|---|
+| F0-01 | Repository initialization and workspace strategy | PASS (round 4) |
+| F0-02 | Claude Code development subagents | PASS (round 4) |
+| F0-03 | Anchor documentation set | PASS (round 4) |
+| F0-04 | CLAUDE.md and STATUS.md | PASS (round 4) |
+| F0-05 | Phase 0 review gate and commit | PASS (round 4) |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F0-01 | Repository initialization and workspace strategy | `IN_REVIEW` |
-| F0-02 | Claude Code development subagents | `IN_REVIEW` |
-| F0-03 | Anchor documentation set | `IN_REVIEW` |
-| F0-04 | CLAUDE.md and STATUS.md | `IN_REVIEW` |
-| F0-05 | Phase 0 review gate and commit | `IN_REVIEW` |
+None.
 
 ## Pending
 
@@ -84,7 +84,9 @@ Phase 0 verification was a documentation consistency review, not a test run. No 
 
 ## Latest Git commit
 
-**None.** The repository has no commits yet — Phase 0 is authored but uncommitted, pending the review gate. The first commit will be `docs: establish MCPForge product and engineering foundation`, and its SHA will be recorded here immediately afterwards.
+`14307517812b75469504f89b47b31e5221defc6b` — `docs: establish MCPForge product and engineering foundation`
+
+Working tree clean at commit time. Push status is recorded in blocker table row B-05 if it did not succeed.
 
 ---
 
@@ -130,7 +132,7 @@ Files introduced:
 - The trust-level enum and the single guarded UI branch that can render "Hardware-backed Confidential Execution Verified".
 - The ban list in `03_SECURITY_ACCESS.md` §10.
 
-**Review gate outcome.** The first reviewer pass returned `FAIL` with 13 defects. All were cleared before the gate was re-run. The substantive ones, recorded here because they shaped the documents:
+**Review gate outcome.** `PASS` on the fourth reviewer round. Round 1 returned `FAIL` with 13 defects; round 2 confirmed those 13 fixed but found 2 residuals; round 3 confirmed those and found 1 knock-on contradiction introduced by the round-2 fix; round 4 passed. All were cleared before the gate closed. The substantive ones, recorded here because they shaped the documents:
 - Phase 0 had been marked complete and committed when it was neither — tickets held at `IN_REVIEW` and the percentage held at 0% until an actual `PASS`.
 - The phase plan summed to 90%. **Phase 9 — Hardening, Demo and Launch** was added with five tickets (F9-01..F9-05) covering end-to-end pipeline testing, performance, accessibility, open-source readiness and demo preparation.
 - 33 of 45 tickets were missing required fields. Every ticket now carries all eight, including Files and Security on the attestation tickets.
