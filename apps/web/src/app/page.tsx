@@ -36,12 +36,18 @@ export default function Home() {
         </p>
 
         <div className="mt-10 flex flex-wrap items-center gap-3">
-          <Button
-            disabled={!authReady}
-            disabledReason="Sign-in is not configured for this deployment yet"
-          >
-            {authReady ? "Sign in to get started" : "Sign-in not configured"}
-          </Button>
+          {authReady ? (
+            <Link
+              href="/workspace"
+              className="inline-flex h-10 items-center justify-center rounded-control bg-accent px-4 text-sm font-medium text-accent-text transition-colors hover:bg-accent-hover"
+            >
+              Open the workspace
+            </Link>
+          ) : (
+            <Button disabled disabledReason="Sign-in is not configured for this deployment yet">
+              Sign-in not configured
+            </Button>
+          )}
           <Link
             href="https://github.com/tony19053000/MCPForge"
             className="text-sm text-muted underline underline-offset-4 hover:text-text"

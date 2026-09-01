@@ -123,19 +123,25 @@ export class ApiClient {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      let split = buffer.indexOf("\n\n");
-      while (split !== -1) {
-        const block = buffer.slice(0, split);
-        buffer = buffer.slice(split + 2);
-        const parsed = parseSseBlock(block);
-        if (parsed) yield parsed;
-        split = buffer.indexOf("\n\n");
+        let split = buffer.indexOf("\n\n");
+        while (split !== -1) {
+          const block = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          const parsed = parseSseBlock(block);
+          if (parsed) yield parsed;
+          split = buffer.indexOf("\n\n");
+        }
       }
+    } finally {
+      // Runs when the consumer stops early, aborts, or throws. Without this the
+      // response body stays open and the server keeps streaming into nothing.
+      await reader.cancel().catch(() => {});
     }
   }
 }

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from google import genai
 from google.genai import types
@@ -191,7 +191,7 @@ class GoogleGenAIProvider:
         )
         await asyncio.sleep(delay)
 
-    async def stream_text(self, request: GenerationRequest) -> AsyncIterator[str]:
+    async def stream_text(self, request: GenerationRequest) -> AsyncGenerator[str]:
         """Stream plain text. Used for conversation, never for structured state."""
         client = self._require_client()
         try:

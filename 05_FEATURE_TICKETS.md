@@ -152,9 +152,10 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Purpose.** Persist the objects the whole product turns on, behind a swappable store.
 **Files.** `services/api/src/mcpforge/models/**`, `services/api/src/mcpforge/store/**`
 **Dependencies.** F2-01
-**Implementation.** Project, Session, Turn, RunEvent, Approval Pydantic models; store port with an in-memory adapter (tests) and a Firestore adapter.
-**Acceptance criteria.** Both adapters pass one shared conformance suite; approval records carry artifact hash and actor uid; no adapter-specific type leaks past the port.
-**Tests.** Store conformance suite run against both adapters; model validation tests.
+**Implementation.** Project, Session, Turn, RunEvent, Approval Pydantic models; store port with an in-memory adapter. The conformance suite is parameterised by adapter from the start, so the Firestore adapter (`F3-08`) drops in without changing a test.
+**Acceptance criteria.** The in-memory adapter passes the shared conformance suite; approval records carry artifact hash and actor uid; ownership is enforced at the query level on both reads and writes; no adapter-specific type leaks past the port.
+**Tests.** Store conformance suite, parameterised by adapter; model validation tests; state transition table tests.
+**Scope note.** The Firestore adapter moved to `F3-08` during the Phase 2 review. It needs a provisioned Firestore database, and nothing in Phase 2 requires persistence across a restart. Deferring it was recorded rather than quietly dropped.
 **Security.** No repository file content is persisted in conversation records. Store enforces per-user project ownership at the query level.
 **Status.** `PENDING`
 
@@ -184,7 +185,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Dependencies.** F2-02, F2-04
 **Implementation.** Approval card per spec §4; endpoints to request and decide; a decision requires an authenticated uid and an artifact hash matching the artifact under review.
 **Acceptance criteria.** UI state derives from server state only; a stale artifact hash invalidates the card; a decision by a non-owner is rejected; a second decision on a decided approval is rejected.
-**Tests.** Unit tests for hash mismatch, wrong actor, double-decision, and expired approval; RTL keyboard-operability and screen-reader-announcement tests.
+**Tests.** Unit tests for hash mismatch, wrong actor and double-decision; RTL keyboard-operability, screen-reader-announcement and typed-confirmation tests. There is no expiry test because approvals deliberately do not expire on a clock — see `02_ARCHITECTURE.md` §6.
 **Security.** No client-side approval shortcut. No model-derived approval. This ticket implements the T4 control surface.
 **Status.** `PENDING`
 
@@ -260,6 +261,16 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** The demo app builds and typechecks on its own; indexing it produces the same shape of `RepositoryIndex` as a GitHub clone; a demo project cannot reach any GitHub write path.
 **Tests.** Build and typecheck of the fixture in CI; index-shape parity test; test that a demo project has no bound repository id and is refused by the PR writer.
 **Security.** A demo project must never be elevatable to `WRITE_PR` — asserted by test.
+**Status.** `PENDING`
+
+### F3-08 — Firestore store adapter
+**Purpose.** Persist projects, sessions and approvals across restarts, behind the existing port.
+**Files.** `services/api/src/mcpforge/store/firestore.py`, `services/api/tests/test_store_conformance.py`
+**Dependencies.** F2-02
+**Implementation.** Firestore adapter using Application Default Credentials — no service-account key. Added to the conformance suite's adapter params so it must pass the same suite as the in-memory adapter, unchanged.
+**Acceptance criteria.** Both adapters pass one shared conformance suite; ownership is enforced in the query, not filtered after the fetch; no Firestore type leaks past the port; a demo project and a real project behave identically.
+**Tests.** The full conformance suite against a Firestore emulator in CI, and against a real database once provisioned. A test asserting no `google.cloud.firestore` import outside the adapter.
+**Security.** Uses ADC (`03_SECURITY_ACCESS.md` §9). Ownership filtering happens server-side in the query so a mis-scoped read cannot return another user's document.
 **Status.** `PENDING`
 
 ---

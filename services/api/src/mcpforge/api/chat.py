@@ -87,6 +87,7 @@ async def chat(
         yield _sse("activity", {"id": started.id, "kind": started.kind, "label": started.label})
 
         collected: list[str] = []
+        stream_iter = None
         try:
             generation = GenerationRequest(
                 system_instruction=INTERACTION_SYSTEM_INSTRUCTION,
@@ -101,7 +102,12 @@ async def chat(
                     step="chat",
                 ),
             )
-            async for chunk in provider.stream_text(generation):
+            stream_iter = provider.stream_text(generation)
+            async for chunk in stream_iter:
+                if await request.is_disconnected():
+                    # The client is gone. Stop pulling from the model rather
+                    # than finishing a response nobody will receive.
+                    break
                 collected.append(chunk)
                 yield _sse("delta", {"text": chunk})
         except GeminiNotConfiguredError as exc:
@@ -111,6 +117,11 @@ async def chat(
             # The real error reaches the user. Never a generic failure message.
             yield _sse("error", {"message": str(exc), "kind": "model_error"})
             return
+        finally:
+            # Closes the upstream generator on disconnect, cancellation, or a
+            # raised error, so a dropped client cannot leave a model call running.
+            if stream_iter is not None:
+                await stream_iter.aclose()
 
         text = "".join(collected).strip()
         if text:

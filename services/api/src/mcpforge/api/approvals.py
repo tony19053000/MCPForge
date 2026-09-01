@@ -128,7 +128,7 @@ async def decide_approval(
     approval.status = body.decision
     approval.actor_uid = identity.subject  # from the verified token, never the body
     approval.decided_at = utcnow()
-    await store.update_approval(approval)
+    await store.update_approval(approval, identity.subject)
 
     await store.append_event(
         RunEvent(

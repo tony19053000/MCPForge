@@ -175,3 +175,87 @@ def test_an_empty_message_is_rejected(client: TestClient) -> None:
     session_id = make_session(client)
     response = client.post(f"/api/sessions/{session_id}/chat", json={"message": ""}, headers=auth())
     assert response.status_code == 422
+
+
+class RecordingStreamProvider:
+    """Records whether its stream was closed, so cancellation is observable."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.chunks_yielded = 0
+
+    @property
+    def configured(self) -> bool:
+        return True
+
+    @property
+    def model(self) -> str:
+        return "fake"
+
+    async def generate_structured(self, request: object, schema: object) -> object:
+        raise NotImplementedError
+
+    async def stream_text(self, request: object):  # type: ignore[no-untyped-def]
+        try:
+            for i in range(1000):
+                self.chunks_yielded = i + 1
+                yield f"chunk-{i} "
+        finally:
+            self.closed = True
+
+
+def test_the_upstream_stream_is_closed_when_the_response_ends(settings: Settings) -> None:
+    """A dropped or completed client must not leave a model call running.
+
+    The handler closes the upstream generator in a finally block, so the model
+    stream is torn down whether the response completed, errored, or the client
+    disconnected.
+    """
+    provider = RecordingStreamProvider()
+    app = create_app(
+        settings,
+        token_verifier=TokenIsUid(),
+        store=InMemoryStore(),
+        gemini=provider,  # type: ignore[arg-type]
+    )
+    with TestClient(app) as client:
+        session_id = make_session(client)
+        with client.stream(
+            "POST",
+            f"/api/sessions/{session_id}/chat",
+            json={"message": "long answer please"},
+            headers=auth(),
+        ) as response:
+            assert response.status_code == 200
+            for _ in zip(response.iter_lines(), range(5), strict=False):
+                pass
+        # Leaving the context manager drops the client.
+    assert provider.closed is True
+
+
+def test_activity_events_are_emitted_so_the_no_reasoning_check_is_not_vacuous(
+    client: TestClient,
+) -> None:
+    """Guards the test below: if no activity event were ever sent, it would pass
+    for the wrong reason."""
+    session_id = make_session(client)
+    response = client.post(
+        f"/api/sessions/{session_id}/chat", json={"message": "hi"}, headers=auth()
+    )
+    activity = [data for name, data in read_sse(response.text) if name == "activity"]
+    assert len(activity) >= 2
+
+
+def test_no_stream_event_carries_a_reasoning_shaped_field(client: TestClient) -> None:
+    """04_FRONTEND_SPEC.md §3 — the wire carries task summaries, never reasoning."""
+    session_id = make_session(client)
+    response = client.post(
+        f"/api/sessions/{session_id}/chat", json={"message": "hi"}, headers=auth()
+    )
+    banned = ("thought", "thinking_", "reasoning", "chain_of_thought", "rationale", "scratchpad")
+    for name, data in read_sse(response.text):
+        if name == "delta":
+            continue  # the model's visible answer, which is the point
+        lowered = data.lower()
+        for word in banned:
+            assert word not in lowered, f"{name} event carried {word!r}: {data}"

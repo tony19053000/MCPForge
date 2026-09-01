@@ -10,7 +10,7 @@ are enforced here rather than left to each caller:
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, TypeVar, runtime_checkable
 
@@ -90,4 +90,6 @@ class GeminiProvider(Protocol):
         self, request: GenerationRequest, schema: type[SchemaT]
     ) -> SchemaT: ...
 
-    def stream_text(self, request: GenerationRequest) -> AsyncIterator[str]: ...
+    # AsyncGenerator, not AsyncIterator: callers must be able to aclose() the
+    # stream so a dropped client cannot leave a model call running.
+    def stream_text(self, request: GenerationRequest) -> AsyncGenerator[str]: ...

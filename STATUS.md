@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**20%** — Phase 1 complete, verified by `[REVIEWER / TESTER]` on round 3.
+**20%** — Phase 1 complete and verified. Phase 2 is implemented and in review; it advances to 30% only on a `[REVIEWER / TESTER]` PASS.
 
 ## Current phase
 
-**Phase 2 — AI Workspace + Gemini (20% → 30%)** — not yet started.
+**Phase 2 — AI Workspace + Gemini (20% → 30%)** — in review.
 
 ## Current ticket
 
-`F2-01` — Gemini provider — `PENDING`
+`F2-01`..`F2-05` — `IN_REVIEW`
 
 ---
 
@@ -37,11 +37,17 @@
 
 ## In progress
 
-None.
+| Ticket | Title | Status |
+|---|---|---|
+| F2-01 | Gemini provider | `IN_REVIEW` — verified live against the real API |
+| F2-02 | Session and conversation model | `IN_REVIEW` |
+| F2-03 | Chat API with streaming | `IN_REVIEW` — verified live end to end |
+| F2-04 | Workspace chat UI and activity timeline | `IN_REVIEW` |
+| F2-05 | Approval interaction UI | `IN_REVIEW` |
 
 ## Pending
 
-Phases 2–9, tickets `F2-01` through `F9-05`. See `05_FEATURE_TICKETS.md`.
+Phases 3–9, tickets `F3-01` through `F9-05`, plus `F3-08` (Firestore adapter, moved out of F2-02 during the Phase 2 review). See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -65,8 +71,9 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **122 passing** — 74 web (Vitest), 48 API (pytest) |
-| Integration | Covered within the suites above: FastAPI routes exercised over ASGI transport with real RS256 tokens |
+| Unit | **272 passing** — 130 web (Vitest/RTL), 142 API (pytest) |
+| Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
+| Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
 | Build | `npm run build` clean (web only — Python has no build step) |
 | Lint | `eslint` clean; `ruff check` and `ruff format --check` clean |
@@ -81,7 +88,9 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Secure execution | Not implemented. Target for Phase 3 is `DEVELOPMENT_ISOLATION` |
 | Client bundle | Verified free of `NEXT_PUBLIC_` values and any credential material |
 | Auth enforcement | Server-side on every authenticated route; RS256 pinned; `alg:none`, expired, wrong-issuer, wrong-audience and forged tokens all rejected by test |
-| Model tool invocation | SDK automatic function calling explicitly disabled. Every action is orchestrated by our code and gated by persisted approvals |
+| Model tool invocation | SDK automatic function calling explicitly disabled, asserted by test |
+| Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
+| Chain-of-thought | Never sent by the API and never rendered by the UI. Both tiers assert it independently |
 | Attestation | **Not implemented, not simulated.** `HARDWARE_ATTESTED` is unreachable |
 | Secret filtering | Specified (`03_SECURITY_ACCESS.md` §4), not implemented |
 | Repository access mode | Not implemented. Default will be `READ_ONLY` |

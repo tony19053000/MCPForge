@@ -94,3 +94,20 @@ describe("the parser itself", () => {
     );
   });
 });
+
+describe("reduced motion", () => {
+  it("disables animation globally when the user asks for less motion", () => {
+    // 04_FRONTEND_SPEC.md §1. Components use animate-pulse (streaming cursor,
+    // skeletons); this rule is what makes that safe.
+    const block = CSS.slice(CSS.indexOf("prefers-reduced-motion"));
+    expect(block).toMatch(/animation-duration:\s*0\.01ms\s*!important/);
+    expect(block).toMatch(/transition-duration:\s*0\.01ms\s*!important/);
+    expect(block).toMatch(/scroll-behavior:\s*auto\s*!important/);
+  });
+
+  it("applies the rule to pseudo-elements too", () => {
+    const block = CSS.slice(CSS.indexOf("prefers-reduced-motion"));
+    expect(block).toContain("*::before");
+    expect(block).toContain("*::after");
+  });
+});

@@ -74,3 +74,15 @@ describe("auth boundary", () => {
     expect(suspicious).toEqual([]);
   });
 });
+
+describe("the web tier cannot reach a model", () => {
+  it("imports no Gemini SDK and holds no model configuration", () => {
+    // 02_ARCHITECTURE.md §1: all AI calls live in the backend. If a model
+    // client ever appeared in the browser bundle, the API key would follow.
+    const offenders = walk(SRC)
+      .filter((f) => /\.tsx?$/.test(f))
+      .filter((f) => /@google\/genai|generativelanguage|GEMINI_API_KEY/i.test(readFileSync(f, "utf8")))
+      .map((f) => path.relative(SRC, f));
+    expect(offenders).toEqual([]);
+  });
+});

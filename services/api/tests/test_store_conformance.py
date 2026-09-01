@@ -173,7 +173,7 @@ async def test_find_approval_matches_only_an_approved_record_for_that_artifact(
 
     approval.status = ApprovalStatus.APPROVED
     approval.actor_uid = OWNER
-    await store.update_approval(approval)
+    await store.update_approval(approval, OWNER)
 
     assert (
         await store.find_approval(session.id, ApprovalGate.TOOL_PLAN, plan_hash, OWNER)
@@ -183,6 +183,23 @@ async def test_find_approval_matches_only_an_approved_record_for_that_artifact(
     # A different artifact is not covered.
     other = artifact_hash({"tools": ["search_hotels", "cancel_booking"]})
     assert await store.find_approval(session.id, ApprovalGate.TOOL_PLAN, other, OWNER) is None
+
+
+async def test_another_user_cannot_write_an_approval(store: Store) -> None:
+    """Ownership is checked on write, not only on the read that preceded it."""
+    _project, session = await make_session(store)
+    approval = await store.create_approval(
+        Approval(
+            project_id=session.project_id,
+            session_id=session.id,
+            gate=ApprovalGate.TOOL_PLAN,
+            artifact_hash="abc",
+            summary="plan",
+        )
+    )
+    approval.status = ApprovalStatus.APPROVED
+    with pytest.raises(NotFoundError):
+        await store.update_approval(approval, OTHER)
 
 
 async def test_another_user_cannot_look_up_an_approval(store: Store) -> None:

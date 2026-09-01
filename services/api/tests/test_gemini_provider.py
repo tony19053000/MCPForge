@@ -238,3 +238,79 @@ def test_vertex_backend_needs_no_api_key() -> None:
 def test_vertex_backend_without_a_project_is_unconfigured() -> None:
     settings = Settings(gemini_backend=GeminiBackend.VERTEX, google_cloud_project=None)
     assert settings.gemini_configured is False
+
+
+# --------------------------------------------------------------------------
+# Request configuration. These assert controls that are claimed in STATUS.md
+# and 02_ARCHITECTURE.md, and that four surviving mutations showed were untested.
+# --------------------------------------------------------------------------
+
+
+async def test_sdk_automatic_function_calling_is_disabled() -> None:
+    """MCPForge never lets the SDK invoke functions on its own.
+
+    Every action is orchestrated by our code and gated by persisted approvals.
+    Leaving AFC enabled would be a path for the SDK to act without a gate.
+    """
+    client = StubClient(['{"framework":"x","routes":[],"confidence":0}'])
+    p = GoogleGenAIProvider(Settings(gemini_api_key="k"), client=client)  # type: ignore[arg-type]
+    await p.generate_structured(request(), Analysis)
+    config = client.models.calls[0]["config"]
+    assert config.automatic_function_calling is not None
+    assert config.automatic_function_calling.disable is True
+
+
+async def test_structured_calls_ask_for_json_matching_the_schema() -> None:
+    client = StubClient(['{"framework":"x","routes":[],"confidence":0}'])
+    p = GoogleGenAIProvider(Settings(gemini_api_key="k"), client=client)  # type: ignore[arg-type]
+    await p.generate_structured(request(), Analysis)
+    config = client.models.calls[0]["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.response_schema is Analysis
+
+
+async def test_the_configured_timeout_is_applied() -> None:
+    client = StubClient(['{"framework":"x","routes":[],"confidence":0}'])
+    settings = Settings(gemini_api_key="k", gemini_timeout_seconds=7)
+    p = GoogleGenAIProvider(settings, client=client)  # type: ignore[arg-type]
+    await p.generate_structured(request(), Analysis)
+    assert client.models.calls[0]["config"].http_options.timeout == 7000
+
+
+async def test_the_system_instruction_is_sent() -> None:
+    client = StubClient(['{"framework":"x","routes":[],"confidence":0}'])
+    p = GoogleGenAIProvider(Settings(gemini_api_key="k"), client=client)  # type: ignore[arg-type]
+    await p.generate_structured(request(), Analysis)
+    assert "Codebase Analyst" in client.models.calls[0]["config"].system_instruction
+
+
+def test_the_vertex_backend_builds_a_vertex_client_with_no_key() -> None:
+    """The no-secret path must not silently fall back to the key path."""
+    settings = Settings(
+        gemini_backend=GeminiBackend.VERTEX,
+        gemini_api_key=None,
+        google_cloud_project="launchforge-tee",
+        google_cloud_location="europe-west4",
+    )
+    client = GoogleGenAIProvider._build_client(settings)
+    assert client is not None
+    assert client.vertexai is True
+    assert client._api_client.project == "launchforge-tee"
+    assert client._api_client.location == "europe-west4"
+
+
+def test_the_api_key_backend_does_not_build_a_vertex_client() -> None:
+    settings = Settings(gemini_backend=GeminiBackend.API_KEY, gemini_api_key="k")
+    client = GoogleGenAIProvider._build_client(settings)
+    assert client is not None
+    assert client.vertexai is False
+
+
+def test_an_unconfigured_backend_builds_no_client_rather_than_a_broken_one() -> None:
+    assert GoogleGenAIProvider._build_client(Settings(gemini_api_key=None)) is None
+    assert (
+        GoogleGenAIProvider._build_client(
+            Settings(gemini_backend=GeminiBackend.VERTEX, google_cloud_project=None)
+        )
+        is None
+    )

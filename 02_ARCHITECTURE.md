@@ -223,13 +223,23 @@ PROJECT_CREATED → REPOSITORY_CONNECTED → ANALYSIS_PENDING → ANALYSIS_RUNNI
 → PR_APPROVED → PR_CREATING → PR_CREATED → COMPLETE
 ```
 
+The table lives in `services/api/src/mcpforge/models/transitions.py` as data. Alongside the forward path above it encodes:
+
+- **A demo shortcut.** `PROJECT_CREATED → ANALYSIS_PENDING`, because a demo project has no repository to connect (`01_PRD.md` §7).
+- **Rejection paths.** Rejecting at a gate returns to the previous decision point rather than halting: `TOOL_PLAN_APPROVAL_PENDING → WORKFLOW_SELECTION_PENDING`, `PATCH_APPROVAL_PENDING → TOOL_PLAN_APPROVAL_PENDING`, `PR_APPROVAL_PENDING → PATCH_APPROVAL_PENDING`.
+- **Retry self-loops** on `ANALYSIS_RUNNING`, `TOOL_PLAN_RUNNING`, `GENERATION_RUNNING` and `PR_CREATING`. A retry never re-enters an already-approved state, so each gated state keeps exactly one entrance.
+
 Rules:
-- The legal transition table lives in code as data, and every transition is checked against it. An illegal transition raises; it does not warn.
+- Every transition is checked against the table. An illegal transition raises; it does not warn.
 - Every transition is persisted with actor (`user` | `system` | `agent:<n>`), timestamp, and cause.
 - `SECURITY_REVIEW_FAILED` and `VALIDATION_FAILED` route back to `GENERATION_RUNNING` with the findings as input, bounded by a retry limit; on exhaustion the run halts and reports.
+
+**Not yet built (Phase 4, ticket F4-05).** The table and its errors exist and are tested, but no production code consults them yet. The retry bound, the halt-and-report terminal state, and the persisted transition record (actor, timestamp, cause) all land with the orchestrator. Until then, do not describe transitions as enforced.
 - Approval states are gates: the transition out of any `*_APPROVAL_PENDING` state requires a persisted `Approval` record with `status == APPROVED`, an authenticated user id, and a payload hash matching the artifact being approved. Approving a tool plan does not approve the patch that plan produced.
 
-`Approval` record: `{ id, project_id, run_id, gate, artifact_hash, status: PENDING|APPROVED|REJECTED, actor_uid, decided_at }`.
+`Approval` record: `{ id, project_id, session_id, gate, artifact_hash, status: PENDING|APPROVED|REJECTED, actor_uid, requested_at, decided_at }`.
+
+**Approvals do not expire on a clock, deliberately.** A time limit would add a second way for a gate to close and a second thing to get wrong. The artifact hash already does the work: any change to what was approved invalidates the approval, which is the case that actually matters. If wall-clock expiry is ever wanted, it is added here first.
 
 Because the approval carries the artifact hash, a regenerated patch invalidates a prior approval automatically.
 

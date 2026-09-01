@@ -1,8 +1,21 @@
 """The legal state transition table — 02_ARCHITECTURE.md §6.
 
-The table is data, and every transition is checked against it. An illegal
-transition raises; it does not warn. Gates listed in GATED_TRANSITIONS cannot be
-crossed without a matching approved `Approval`.
+**Status: this module is data and vocabulary, not yet an enforcement point.**
+The orchestrator that consults it lands in Phase 4 (ticket F4-05). Until then
+`is_legal`, `gate_for`, `AWAITING_HUMAN`, `IllegalTransitionError` and
+`ApprovalRequiredError` are defined and tested but called by no production code.
+Do not describe them as enforced anywhere until F4-05 lands.
+
+What the table encodes, and what F4-05 must enforce:
+
+- Every transition is checked against `LEGAL`. An illegal transition raises; it
+  does not warn.
+- Entering a state in `GATED_TRANSITIONS` requires an `Approval` that is
+  APPROVED and whose `artifact_hash` matches the artifact being acted on.
+- Each gated state has exactly one entrance — its `*_APPROVAL_PENDING` state —
+  which is what makes "unreachable without an approval" checkable.
+- Retries self-loop on the running step rather than falling back into an
+  already-approved state.
 """
 
 from __future__ import annotations

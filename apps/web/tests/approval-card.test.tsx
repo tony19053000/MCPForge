@@ -119,3 +119,64 @@ describe("approval card", () => {
     expect(onDecide).toHaveBeenCalledWith("APPROVED");
   });
 });
+
+describe("approve · modify · reject", () => {
+  it("offers Modify when the caller supports it", async () => {
+    const onModify = vi.fn();
+    render(<ApprovalCard approval={approval()} onDecide={vi.fn()} onModify={onModify} />);
+    await userEvent.click(screen.getByRole("button", { name: "Modify" }));
+    expect(onModify).toHaveBeenCalled();
+  });
+
+  it("omits Modify when there is nothing to modify", () => {
+    render(<ApprovalCard approval={approval()} onDecide={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Modify" })).not.toBeInTheDocument();
+  });
+
+  it("announces itself to assistive technology", () => {
+    render(<ApprovalCard approval={approval()} onDecide={vi.fn()} />);
+    const region = screen.getByRole("region", { name: /4 WebMCP tools/ });
+    expect(region).toHaveAttribute("aria-live", "polite");
+  });
+});
+
+describe("actions that reach outside MCPForge", () => {
+  it("requires typed confirmation before opening a pull request", async () => {
+    const onDecide = vi.fn().mockResolvedValue(undefined);
+    render(<ApprovalCard approval={approval({ gate: "PULL_REQUEST" })} onDecide={onDecide} />);
+
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(approve).toBeDisabled();
+    await userEvent.click(approve);
+    expect(onDecide).not.toHaveBeenCalled();
+
+    await userEvent.type(screen.getByLabelText(/type approve to confirm/i), "approve");
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(onDecide).toHaveBeenCalledWith("APPROVED");
+  });
+
+  it("requires typed confirmation before widening repository access", () => {
+    render(<ApprovalCard approval={approval({ gate: "ACCESS_ELEVATION" })} onDecide={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+  });
+
+  it("rejects a near-miss confirmation", async () => {
+    render(<ApprovalCard approval={approval({ gate: "PULL_REQUEST" })} onDecide={vi.fn()} />);
+    await userEvent.type(screen.getByLabelText(/type approve to confirm/i), "approv");
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+  });
+
+  it("still allows rejecting without typing anything", async () => {
+    const onDecide = vi.fn().mockResolvedValue(undefined);
+    render(<ApprovalCard approval={approval({ gate: "PULL_REQUEST" })} onDecide={onDecide} />);
+    await userEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(onDecide).toHaveBeenCalledWith("REJECTED");
+  });
+
+  it("does not ask for typed confirmation on an internal gate", () => {
+    render(<ApprovalCard approval={approval({ gate: "TOOL_PLAN" })} onDecide={vi.fn()} />);
+    expect(screen.queryByLabelText(/type approve to confirm/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+});

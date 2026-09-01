@@ -8,7 +8,7 @@ never selected by configuration and cannot be reached from the application.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncGenerator, Iterable
 
 from pydantic import ValidationError
 
@@ -66,7 +66,7 @@ class FakeGeminiProvider:
         except ValidationError as exc:
             raise GeminiSchemaError(f"schema validation failed: {exc}", raw=raw) from exc
 
-    async def stream_text(self, request: GenerationRequest) -> AsyncIterator[str]:
+    async def stream_text(self, request: GenerationRequest) -> AsyncGenerator[str]:
         self.calls.append(request)
         item = self._next()
         if isinstance(item, Exception):

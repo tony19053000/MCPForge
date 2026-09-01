@@ -123,7 +123,10 @@ class InMemoryStore:
         await self._owned_session(approval.session_id, owner_uid)
         return deepcopy(approval)
 
-    async def update_approval(self, approval: Approval) -> Approval:
+    async def update_approval(self, approval: Approval, owner_uid: str) -> Approval:
+        # Ownership is re-checked on write, not only on the preceding read, so
+        # the port's guarantee holds for any caller.
+        await self._owned_session(approval.session_id, owner_uid)
         async with self._lock:
             if approval.id not in self._approvals:
                 raise NotFoundError(f"approval {approval.id}")
