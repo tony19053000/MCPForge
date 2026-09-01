@@ -21,6 +21,38 @@ from mcpforge.config import Environment, Settings
 TEST_PROJECT = "mcpforge-test"
 TEST_KID = "test-key-1"
 
+# Every MCPFORGE-relevant variable, cleared before each test.
+_ENV_VARS = (
+    "MCPFORGE_ENV",
+    "LOG_LEVEL",
+    "API_CORS_ORIGINS",
+    "GEMINI_BACKEND",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL",
+    "FIREBASE_PROJECT_ID",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_QUOTA_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "SECURE_EXECUTOR",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must not depend on the developer's .env or shell.
+
+    Without this, a real GEMINI_API_KEY in a local .env silently makes
+    "unconfigured" tests pass for the wrong reason — or fail, which is how this
+    was found. Settings is pinned to read no env file, and every relevant
+    variable is cleared, so every test states its own configuration explicitly.
+    """
+    from mcpforge import config as config_module
+
+    monkeypatch.setitem(config_module.Settings.model_config, "env_file", None)
+    for var in _ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    config_module.get_settings.cache_clear()
+
 
 @pytest.fixture(scope="session")
 def rsa_key() -> rsa.RSAPrivateKey:

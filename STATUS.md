@@ -51,7 +51,7 @@ Phases 2–9, tickets `F2-01` through `F9-05`. See `05_FEATURE_TICKETS.md`.
 
 | ID | Blocker | Impact | Status |
 |---|---|---|---|
-| B-01 | No Gemini API key configured | Phase 2 cannot run live model calls; provider and fake-provider tests can still be built | Open — needs owner to supply `GEMINI_API_KEY` |
+| B-01 | ~~No Gemini API key~~ — **resolved** | Key supplied and verified with a real structured call and a real stream against `gemini-3.7-flash`. Vertex/ADC is also implemented as a no-secret alternative | Closed |
 | B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally (quota project `launchforge-tee`) | Closed |
 | B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
 | B-03 | No GitHub App registered | Phase 3 client can be built and unit-tested against a mocked API; real installation needs the App | Open — needs owner to register the App and supply id + private key |
@@ -81,6 +81,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Secure execution | Not implemented. Target for Phase 3 is `DEVELOPMENT_ISOLATION` |
 | Client bundle | Verified free of `NEXT_PUBLIC_` values and any credential material |
 | Auth enforcement | Server-side on every authenticated route; RS256 pinned; `alg:none`, expired, wrong-issuer, wrong-audience and forged tokens all rejected by test |
+| Model tool invocation | SDK automatic function calling explicitly disabled. Every action is orchestrated by our code and gated by persisted approvals |
 | Attestation | **Not implemented, not simulated.** `HARDWARE_ATTESTED` is unreachable |
 | Secret filtering | Specified (`03_SECURITY_ACCESS.md` §4), not implemented |
 | Repository access mode | Not implemented. Default will be `READ_ONLY` |
@@ -196,6 +197,43 @@ Files introduced:
 
 **What NOT to change accidentally.** The two auth ports and their boundary tests. The credential-free verification path. `hardware_attested` as a literal with no assignment path. The self-guarding structure of the contrast and CSS-syntax tests.
 
-**Unresolved.** Blockers B-01 (no `GEMINI_API_KEY`) and B-03 (no GitHub App) remain open and are now on the critical path for Phases 2 and 3. Firebase sign-in is wired but untested against the live project, since no credentials are configured in this environment.
+**Unresolved.** Blocker B-03 (no GitHub App) remains open and is on the critical path for Phase 3. B-01 was closed during Phase 2 — see log entry 0004. Firebase sign-in is wired but untested against the live project, since no credentials are configured in this environment.
 
 **Next intended task.** `F2-01` — Gemini provider over `google-genai`, with `generate_structured` re-validating model output against the Pydantic schema on our side.
+
+### 0004 — Phase 2 in progress: Gemini provider live-verified
+
+**F2-01 complete and verified against the real API.** A structured call and a
+stream both succeeded against `gemini-3.7-flash`, and the structured response
+passed our own Pydantic validation, not merely the SDK's. Blocker B-01 is closed.
+
+**Correction worth recording.** I twice told the owner that a key beginning `AQ.`
+was not a Gemini key, on the belief that keys start with `AIza`. That was wrong:
+current Google AI Studio keys are `AQ.`-prefixed and about 53 characters. The
+`AIza` form still exists. **Do not validate or reject a Gemini key by prefix** —
+`.env.example` now says so explicitly.
+
+**SDK automatic function calling is disabled outright.** The live run surfaced an
+SDK warning about AFC. MCPForge never lets the SDK invoke functions on its own:
+every action is orchestrated by our deterministic code and gated by persisted
+approvals, so leaving AFC enabled-but-unused would be a latent path for the SDK
+to act without passing a gate. `automatic_function_calling=disable=True` is now
+set on every request.
+
+**Two backends, both real.** `GEMINI_BACKEND=api_key` uses a key;
+`GEMINI_BACKEND=vertex` uses Application Default Credentials against a GCP
+project and needs no secret at all. Callers cannot tell which is in use. The
+Vertex path is preferred where policy restricts key material and is the
+recommended production direction; it requires `aiplatform.googleapis.com`
+enabled on the project.
+
+**Environment layout.** The backend reads the repo-root `.env` first, then an
+optional `services/api/.env` override, so one file at the root configures it.
+The web tier reads `apps/web/.env.local`. Both are gitignored.
+
+**Care note.** `.env` was accidentally overwritten twice with `cp .env.example
+.env` while scaffolding, destroying a value the owner had already set. Never
+copy over `.env`; edit it line-targeted, or write only when it does not exist.
+
+**Next intended task.** `F2-02` — session and conversation model with the store
+port and its in-memory adapter.

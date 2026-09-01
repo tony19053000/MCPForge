@@ -106,6 +106,11 @@ class GoogleGenAIProvider:
             max_output_tokens=request.max_output_tokens,
             response_mime_type="application/json" if schema else None,
             response_schema=schema,
+            # MCPForge never lets the SDK invoke functions on its own. Every
+            # action is orchestrated by our deterministic code and gated by
+            # persisted approvals, so SDK-side automatic function calling is
+            # disabled outright rather than left unused.
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             http_options=types.HttpOptions(timeout=self._settings.gemini_timeout_seconds * 1000),
         )
 

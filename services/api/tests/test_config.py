@@ -81,7 +81,6 @@ def test_startup_aborts_when_production_configuration_is_missing(
     for var in ("FIREBASE_PROJECT_ID", "GEMINI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("MCPFORGE_ENV", "production")
-    monkeypatch.setitem(config_module.Settings.model_config, "env_file", None)
     config_module.get_settings.cache_clear()
 
     try:
@@ -109,3 +108,17 @@ def test_startup_succeeds_in_development_without_optional_configuration(
         assert settings.auth_configured is False
     finally:
         config_module.get_settings.cache_clear()
+
+
+def test_tests_do_not_inherit_local_developer_configuration() -> None:
+    """Guards the isolation fixture itself.
+
+    A real key in the developer's .env once made two tests fail — and could
+    equally have made an "unconfigured" test pass for the wrong reason. This
+    asserts the default test Settings sees nothing from the environment.
+    """
+    s = Settings()
+    assert s.gemini_api_key is None
+    assert s.firebase_project_id is None
+    assert s.gemini_configured is False
+    assert s.auth_configured is False
