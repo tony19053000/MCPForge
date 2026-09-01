@@ -161,7 +161,10 @@ class DevelopmentSecureExecutor:
         resource.setrlimit(resource.RLIMIT_CPU, (self._cpu_seconds, self._cpu_seconds))
         limit = self._memory_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-        resource.setrlimit(resource.RLIMIT_NPROC, (256, 256))
+        # Deliberately no RLIMIT_NPROC. It is a per-UID limit, not per-process:
+        # setting it here would fail against the whole account's process count
+        # and break legitimate work (git clone forks a helper) while isolating
+        # nothing. Process containment belongs to the Phase 8 executor.
         resource.setrlimit(resource.RLIMIT_FSIZE, (256 * 1024 * 1024, 256 * 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         os.setsid()
