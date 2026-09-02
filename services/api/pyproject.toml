@@ -16,7 +16,6 @@ dependencies = [
     "tree-sitter>=0.23",
     "tree-sitter-typescript>=0.23",
     "google-cloud-firestore>=2.19",
-    "jsonschema>=4.26.0",
 ]
 
 [dependency-groups]
@@ -26,6 +25,7 @@ dev = [
     "mypy>=1.14",
     "ruff>=0.9",
     "cryptography>=44.0",
+    "jsonschema>=4.25",
     "types-jsonschema>=4.26.0.20260518",
 ]
 

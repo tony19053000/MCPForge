@@ -87,8 +87,12 @@ class ToolPlanEntry(BaseModel):
     output_description: str = Field(min_length=1, max_length=300)
     risk: RiskClass
     evidence: list[Evidence] = Field(min_length=1)
-    #: Set by deterministic code, not by the model. See ToolPlan.reconcile_risk.
-    approval_required: bool = False
+    #: Set by `reconcile_risk`, never by the model.
+    #:
+    #: It is excluded from the schema sent to Gemini (see `model_response_schema`
+    #: below), so the model has nowhere to put a value for it. It was previously
+    #: part of that schema while a comment claimed otherwise.
+    approval_required: bool = Field(default=False, exclude=False)
 
     def input_schema(self) -> dict[str, Any]:
         """The JSON Schema a browser agent will see."""
@@ -107,8 +111,47 @@ class ToolPlanEntry(BaseModel):
         )
 
 
+class ProposedTool(BaseModel):
+    """What the model is asked for: everything except the derived fields.
+
+    `approval_required` is absent on purpose. A model cannot set a field that is
+    not in the schema it was given.
+    """
+
+    name: str = Field(pattern=TOOL_NAME_PATTERN)
+    title: str = Field(min_length=1, max_length=60)
+    description: str = Field(min_length=1, max_length=300)
+    workflow_id: str = Field(min_length=1)
+    maps_to_function: str = Field(min_length=1)
+    parameters: list[ToolParameter] = Field(default_factory=list)
+    output_description: str = Field(min_length=1, max_length=300)
+    risk: RiskClass
+    evidence: list[Evidence] = Field(min_length=1)
+
+    def forbidden_parameters(self) -> list[str]:
+        return sorted(
+            p.name for p in self.parameters if p.name.lower() in FORBIDDEN_PARAMETER_NAMES
+        )
+
+
+class ProposedToolPlan(BaseModel):
+    """Agent 2's response schema. Converted to a `ToolPlan` on our side."""
+
+    tools: list[ProposedTool] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    def tool_names(self) -> list[str]:
+        return [t.name for t in self.tools]
+
+    def to_plan(self) -> ToolPlan:
+        return ToolPlan(
+            tools=[ToolPlanEntry(**t.model_dump()) for t in self.tools],
+            notes=list(self.notes),
+        )
+
+
 class ToolPlan(BaseModel):
-    """Agent 2's output, before the deterministic risk reconciliation."""
+    """A plan on our side, before or after risk reconciliation."""
 
     tools: list[ToolPlanEntry] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

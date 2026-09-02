@@ -160,7 +160,7 @@ Six roles, one provider. Each agent = system instruction + input schema + strict
 
 | # | Agent | Input | Output |
 |---|---|---|---|
-| 1 | Codebase Analyst | filtered repository index + selected snippets | `CodebaseAnalysis` (framework, routes, components, API handlers, services, business ops, forms, call graph edges, candidate workflows, evidence refs) |
+| 1 | Codebase Analyst | filtered repository index + selected snippets | `CodebaseAnalysis` (framework, summary, business operations, candidate workflows, unknowns) — each claim carrying evidence |
 | 2 | Workflow Architect | analysis + developer-selected workflows | `ToolPlan` (tools: name, description, JSON Schema input, output contract, risk class, approval requirement, mapping to existing function) |
 | 3 | WebMCP Generator | approved tool plan + relevant source | `GeneratedPatch` (file changes, per-file rationale, generated tests) |
 | 4 | Security Reviewer | generated patch + tool plan + policy | `SecurityReport` (PASS/FAIL, findings with severity, recommended fixes) |
@@ -168,6 +168,14 @@ Six roles, one provider. Each agent = system instruction + input schema + strict
 | 6 | Human Approval / Interaction | conversation + current run state | `InteractionTurn` (message, offered choices, requested approval id) |
 
 Agent 6 may *interpret* natural language into a proposed decision. It may never *be* the decision — see §6.
+
+**The structural half is not asked of the model.** Routes, components, API
+handlers, services and the call graph are produced deterministically by the
+indexer (§5) and given *to* agent 1 as input. Asking a model to restate facts we
+already know exactly would add a way to be wrong for no gain, and every restated
+fact would then need verifying against the index anyway. The agent is asked only
+for the judgement the index cannot supply: which functions are business
+operations, which of them form a user-facing workflow, and how risky each is.
 
 Agent boundaries:
 - Agents 1, 2, 4, 6 never touch the filesystem.

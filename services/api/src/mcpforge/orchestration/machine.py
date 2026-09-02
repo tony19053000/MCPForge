@@ -18,7 +18,6 @@ from dataclasses import dataclass
 
 from mcpforge.logging import get_logger
 from mcpforge.models.core import (
-    Approval,
     ApprovalGate,
     Origin,
     RunEvent,
@@ -32,7 +31,7 @@ from mcpforge.models.transitions import (
     gate_for,
     is_legal,
 )
-from mcpforge.store.port import Store
+from mcpforge.store.port import NotFoundError, Store
 
 log = get_logger(__name__)
 
@@ -69,14 +68,17 @@ class RunMachine:
         actor: str,
         origin: Origin,
         cause: str,
-        approval: Approval | None = None,
+        approval_id: str | None = None,
         artifact_hash: str | None = None,
     ) -> Session:
         """Move a session to `target`, or raise.
 
-        `approval` and `artifact_hash` are required when entering a gated state
-        and ignored otherwise, so a caller cannot accidentally pass an approval
-        for the wrong thing and have it quietly accepted.
+        Gated transitions take an **approval id**, never an `Approval` object.
+        The record is loaded from the store here, so a caller cannot hand in an
+        approval it constructed, or one belonging to another session — both of
+        which an earlier version accepted, because `artifact_hash` is derived
+        from content and is therefore identical across sessions analysing the
+        same repository.
         """
         current = session.state
 
@@ -85,7 +87,7 @@ class RunMachine:
 
         gate = gate_for(target)
         if gate is not None:
-            self._require_approval(gate, target, approval, artifact_hash)
+            await self._require_approval(session, gate, target, approval_id, artifact_hash)
 
         updated = session.model_copy(update={"state": target})
         await self._store.update_session(updated)
@@ -114,15 +116,34 @@ class RunMachine:
         )
         return updated
 
-    @staticmethod
-    def _require_approval(
+    async def _require_approval(
+        self,
+        session: Session,
         gate: ApprovalGate,
         target: RunState,
-        approval: Approval | None,
+        approval_id: str | None,
         artifact_hash: str | None,
     ) -> None:
-        """The gate check. Reads a stored record and nothing else."""
-        if approval is None or artifact_hash is None:
+        """The gate check. Loads the record from the store and nothing else.
+
+        Four things must hold, and each has been a way in:
+
+        - an id was supplied at all
+        - the record exists in the store, and the session's owner can see it
+        - it belongs to *this* session and project, not merely to some session
+        - it is APPROVED and its hash still matches the artifact
+        """
+        if approval_id is None or artifact_hash is None:
+            raise ApprovalRequiredError(target, gate)
+
+        try:
+            approval = await self._store.get_approval(approval_id, session.owner_uid)
+        except NotFoundError as exc:
+            raise ApprovalRequiredError(target, gate) from exc
+
+        if approval.session_id != session.id or approval.project_id != session.project_id:
+            # An approval from another run over the same repository has the same
+            # artifact hash, so this check is what stops it being reused here.
             raise ApprovalRequiredError(target, gate)
         if approval.gate is not gate:
             raise ApprovalRequiredError(target, gate)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from mcpforge.agents.architect import infer_risk_from_function
 from mcpforge.agents.base import Agent
 from mcpforge.models.analysis import Evidence
 from mcpforge.models.security import Finding, GateVerdict, SecurityReport, Severity
@@ -78,18 +79,33 @@ def policy_findings(plan: ToolPlan) -> list[Finding]:
 
     Deliberately narrow and mechanical: each one is a rule from
     03_SECURITY_ACCESS.md §8 that can be decided without judgement.
+
+    Crucially, risk is **re-derived here** rather than read from `tool.risk`.
+    Both `risk` and `approval_required` are fields the model fills, so a check
+    that trusted them would be deterministic in name only: an unreconciled plan
+    marking `cancelReservation` as READ with no approval would sail through.
+    This function does not assume `reconcile_risk` has run.
     """
     findings: list[Finding] = []
 
     for tool in plan.tools:
-        if tool.risk.requires_approval and not tool.approval_required:
+        inferred = infer_risk_from_function(tool.maps_to_function)
+        enforced = tool.risk if tool.risk.rank >= inferred.rank else inferred
+
+        if enforced.requires_approval and not tool.approval_required:
             findings.append(
                 Finding(
                     rule="approval-required-for-state-change",
                     severity=Severity.CRITICAL,
                     summary=(
-                        f"Tool '{tool.name}' is {tool.risk.value} but is not gated by "
+                        f"Tool '{tool.name}' is {enforced.value} but is not gated by "
                         "human approval."
+                        + (
+                            f" The plan claimed {tool.risk.value}; "
+                            f"'{tool.maps_to_function}' reads as {inferred.value}."
+                            if enforced is not tool.risk
+                            else ""
+                        )
                     ),
                     recommendation="Set approval_required, or reduce what the tool does.",
                     evidence=Evidence(path=tool.evidence[0].path, symbol=tool.maps_to_function),

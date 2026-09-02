@@ -10,11 +10,11 @@
 
 ## Current phase
 
-**Phase 4 — Six-Agent Orchestration (40% → 50%)** — not yet started.
+**Phase 4 — Six-Agent Orchestration (40% → 50%)** — implemented, in review.
 
 ## Current ticket
 
-`F4-01` — Agent framework and base contract — `PENDING`
+`F4-01`..`F4-05` — `IN_REVIEW`
 
 ---
 
@@ -50,7 +50,13 @@
 
 ## In progress
 
-None.
+| Ticket | Title | Status |
+|---|---|---|
+| F4-01 | Agent framework and base contract | `IN_REVIEW` |
+| F4-02 | Codebase Analyst | `IN_REVIEW` — verified live against Gemini |
+| F4-03 | Workflow Architect | `IN_REVIEW` |
+| F4-04 | Security Reviewer and Human Interaction | `IN_REVIEW` |
+| F4-05 | Orchestrator and state machine | `IN_REVIEW` |
 
 ## Pending
 
@@ -78,7 +84,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **509 passing** — 130 web (Vitest/RTL), 379 API (pytest). A further 15 run against live Firestore when opted in |
+| Unit | **615 passing** — 130 web (Vitest/RTL), 485 API (pytest). A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -96,6 +102,8 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Client bundle | Contains the Firebase Web config (`NEXT_PUBLIC_FIREBASE_*`) and `NEXT_PUBLIC_AUTH_PROVIDERS` — public browser identifiers by design, required for sign-in. Verified free of the Gemini key, any model SDK, and any service-account or private-key material. Enforced by a CI step that scans the built bundle |
 | Auth enforcement | Server-side on every authenticated route; RS256 pinned; `alg:none`, expired, wrong-issuer, wrong-audience and forged tokens all rejected by test |
 | Model tool invocation | SDK automatic function calling explicitly disabled, asserted by test |
+| Model output as authorization | Impossible by construction. Gates load an `Approval` from the store by id, check it belongs to this session and project, and check its hash still matches. The interaction agent has no field in which to express an approval |
+| Risk classification | Re-derived from the mapped function by the policy engine itself, not read from the model's field. The stricter of the two verdicts wins |
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
 | Chain-of-thought | Never sent by the API and never rendered by the UI. Both tiers assert it independently |
 | Attestation | **Not implemented, not simulated.** An AST-based test asserts `HARDWARE_ATTESTED` appears nowhere in backend code except as an enum member |

@@ -36,6 +36,10 @@ from mcpforge.logging import get_logger
 
 log = get_logger(__name__)
 
+#: Rejection notes are surfaced on the activity timeline, so they are truncated
+#: the same way the log line beside them is.
+MAX_NOTE_LENGTH = 200
+
 #: Prepended to any repository content placed in a prompt. The boundary matters
 #: more than the wording: everything after it is data.
 UNTRUSTED_CONTENT_PREAMBLE = """
@@ -167,7 +171,7 @@ class Agent[InputT: BaseModel, OutputT: BaseModel](abc.ABC):
             except AgentEvidenceError as exc:
                 last_error = exc
                 record.evidence_rejections += 1
-                record.notes.append(str(exc))
+                record.notes.append(str(exc)[:MAX_NOTE_LENGTH])
                 log.warning(
                     "agent.evidence_rejected",
                     agent=self.name,

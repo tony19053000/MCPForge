@@ -161,16 +161,41 @@ async def test_low_confidence_workflows_are_flagged(index: RepositoryIndex) -> N
     assert analysis.workflows[1].is_low_confidence is False
 
 
-def test_the_analyst_never_touches_the_filesystem() -> None:
-    """02_ARCHITECTURE.md §4 — agents 1, 2, 4 and 6 read no files."""
+@pytest.mark.parametrize(
+    "module", ["analyst.py", "architect.py", "security_reviewer.py", "interaction.py"]
+)
+def test_reasoning_agents_never_touch_the_filesystem(module: str) -> None:
+    """02_ARCHITECTURE.md §4 — agents 1, 2, 4 and 6 read no files.
+
+    They see only what retrieval selected, already filtered. An agent that could
+    open a file could read a quarantined one.
+    """
+    import re
+
     from tests.structure import SRC, code_lines
 
-    agent_file = SRC / "mcpforge" / "agents" / "analyst.py"
-    banned = ("open(", "read_text", "Path(", "os.", "subprocess")
+    agent_file = SRC / "mcpforge" / "agents" / module
+    # Word-bounded: `gate_is_open(` is not `open(`.
+    banned = re.compile(
+        r"\b(open|read_text|read_bytes|write_text|Path|glob|listdir|remove|unlink)\s*\("
+        r"|\bos\.|\bsubprocess\b|\bshutil\b"
+    )
     offenders = [
-        f"{agent_file.name}:{lineno}: {code}"
+        f"{module}:{lineno}: {code}"
         for lineno, code in code_lines(agent_file)
-        for term in banned
-        if term in code
+        if banned.search(code)
     ]
-    assert not offenders, "analyst touches the filesystem:\n" + "\n".join(offenders)
+    assert not offenders, f"{module} touches the filesystem:\n" + "\n".join(offenders)
+
+
+def test_the_generator_is_deliberately_not_in_that_list() -> None:
+    """Agent 3 emits a patch representation and still writes nothing itself.
+
+    Recorded so the omission above reads as a decision rather than an oversight;
+    F5-02 will assert the generator has no filesystem or GitHub capability.
+    """
+    from tests.structure import SRC
+
+    assert not (SRC / "mcpforge" / "agents" / "generator.py").exists(), (
+        "the generator now exists — add its own capability test in F5-02"
+    )

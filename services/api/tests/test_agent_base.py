@@ -130,3 +130,41 @@ def test_the_run_record_carries_no_prompt_or_output_text() -> None:
         "evidence_rejections",
         "notes",
     }
+
+
+def test_no_agent_overrides_the_run_loop_or_reaches_the_provider() -> None:
+    """F4-01: a subclass must not be able to return unvalidated output.
+
+    The base's docstring says subclasses never touch the provider. That was a
+    convention until this test: nothing stopped an agent overriding `run` or
+    calling `generate_structured` itself and skipping both schema validation and
+    the verify hook.
+    """
+    import ast
+
+    from tests.structure import SRC
+
+    offenders: list[str] = []
+    for path in (SRC / "mcpforge" / "agents").rglob("*.py"):
+        if path.name in ("base.py", "__init__.py"):
+            continue
+        tree = ast.parse(path.read_text())
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for item in node.body:
+                    if (
+                        isinstance(item, ast.AsyncFunctionDef | ast.FunctionDef)
+                        and item.name == "run"
+                    ):
+                        offenders.append(f"{path.name}:{item.lineno}: {node.name} overrides run()")
+            if isinstance(node, ast.Attribute) and node.attr in (
+                "generate_structured",
+                "stream_text",
+            ):
+                offenders.append(f"{path.name}:{node.lineno}: calls provider.{node.attr} directly")
+            if isinstance(node, ast.Attribute) and node.attr == "_provider":
+                # The base owns it; a subclass reaching for it is the bypass.
+                offenders.append(f"{path.name}:{node.lineno}: reaches for self._provider")
+
+    assert not offenders, "an agent can bypass validation:\n" + "\n".join(offenders)

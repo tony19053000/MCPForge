@@ -16,10 +16,11 @@ import re
 
 from pydantic import BaseModel, Field
 
-from mcpforge.agents.base import Agent, AgentEvidenceError
+from mcpforge.agents.base import Agent, AgentEvidenceError, AgentRun
+from mcpforge.gemini.provider import TraceContext
 from mcpforge.models.analysis import CodebaseAnalysis, RiskClass, Workflow
 from mcpforge.models.index import RepositoryIndex
-from mcpforge.models.toolplan import ToolPlan, ToolPlanEntry
+from mcpforge.models.toolplan import ProposedToolPlan, ToolPlan, ToolPlanEntry
 
 SYSTEM_INSTRUCTION = """
 You are the MCPForge Workflow Architect.
@@ -119,10 +120,11 @@ class ArchitectInput(BaseModel):
         return [w for w in self.analysis.workflows if w.id in chosen]
 
 
-class WorkflowArchitect(Agent[ArchitectInput, ToolPlan]):
+class WorkflowArchitect(Agent[ArchitectInput, ProposedToolPlan]):
     name = "architect"
     step = "Designing WebMCP tools"
-    output_model = ToolPlan
+    #: The model never sees `approval_required`; it is derived by reconcile_risk.
+    output_model = ProposedToolPlan
 
     def system_instruction(self) -> str:
         return SYSTEM_INSTRUCTION
@@ -147,7 +149,7 @@ class WorkflowArchitect(Agent[ArchitectInput, ToolPlan]):
                     )
         return "\n".join(lines)
 
-    def verify(self, output: ToolPlan, payload: ArchitectInput) -> None:
+    def verify(self, output: ProposedToolPlan, payload: ArchitectInput) -> None:
         """Reject a plan that cannot be generated from.
 
         Checked here rather than at generation time, because a tool naming a
@@ -190,6 +192,22 @@ class WorkflowArchitect(Agent[ArchitectInput, ToolPlan]):
 
         if problems:
             raise AgentEvidenceError("Tool plan rejected: " + "; ".join(problems[:5]))
+
+    async def design(
+        self, payload: ArchitectInput, trace: TraceContext
+    ) -> tuple[ToolPlan, list[RiskDiscrepancy], AgentRun]:
+        """Produce a **reconciled** plan. The only way to get a plan from here.
+
+        `run()` returns the model's proposal, which has no `approval_required`
+        at all. Callers use this, so reconciliation cannot be skipped by
+        forgetting a step — an earlier version left `reconcile_risk` with no
+        caller in `src/` while the policy engine assumed it had run.
+        """
+        proposed, record = await self.run(payload, trace)
+        reconciled, discrepancies = reconcile_risk(proposed.to_plan())
+        for discrepancy in discrepancies:
+            record.notes.append(discrepancy.reason)
+        return reconciled, discrepancies, record
 
 
 def reconcile_risk(plan: ToolPlan) -> tuple[ToolPlan, list[RiskDiscrepancy]]:

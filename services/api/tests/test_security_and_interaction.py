@@ -6,6 +6,7 @@ open a gate by saying so, and must not be able to approve anything at all.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -40,6 +41,7 @@ from mcpforge.models.security import SecurityReport, Severity
 from mcpforge.models.toolplan import ToolPlan
 
 TRACE = TraceContext(project_id="p", run_id="r", agent="a", step="s")
+DEMO = Path(__file__).resolve().parents[3] / "fixtures" / "demo-hotel-app"
 
 
 def tool(**over: Any) -> dict[str, Any]:
@@ -292,3 +294,84 @@ async def test_the_security_prompt_lists_the_tools_not_their_source() -> None:
     assert "cancel_reservation" in prompt
     assert "approval required : True" in prompt
     assert "RESERVATIONS.set" not in prompt
+
+
+# -- the policy engine must not trust the model's own fields ----------------
+
+
+def test_an_unreconciled_under_classified_plan_is_still_blocked() -> None:
+    """The check must not depend on `reconcile_risk` having run.
+
+    `risk` and `approval_required` are both fields the model fills. An earlier
+    version read them directly, so a plan calling cancelReservation while
+    claiming READ with no approval passed a "deterministic" gate.
+    """
+    unreconciled = plan(risk="READ", approval_required=False)
+    findings = policy_findings(unreconciled)
+
+    assert any(f.rule == "approval-required-for-state-change" for f in findings)
+    blocking = [f for f in findings if f.severity.blocks]
+    assert blocking
+    assert "cancelReservation" in blocking[0].summary
+    assert "claimed READ" in blocking[0].summary
+
+
+def test_the_gate_blocks_an_unreconciled_plan_even_with_an_agent_pass() -> None:
+    verdict = evaluate_gate(report(advisory_pass=True), plan(risk="READ", approval_required=False))
+    assert verdict.passed is False
+    assert verdict.overridden is True
+
+
+def test_the_model_cannot_be_asked_for_approval_required_at_all() -> None:
+    """Structural: the field is absent from the schema Gemini is given, so
+    there is nowhere for a model to put a value for it."""
+    from mcpforge.models.toolplan import ProposedTool
+
+    assert "approval_required" not in ProposedTool.model_fields
+    assert (
+        "approval_required"
+        in __import__(
+            "mcpforge.models.toolplan", fromlist=["ToolPlanEntry"]
+        ).ToolPlanEntry.model_fields
+    )
+
+
+async def test_the_architect_returns_a_reconciled_plan_not_a_raw_one() -> None:
+    """`design()` is the only way to get a plan, so reconciliation cannot be
+    skipped by forgetting a step."""
+    from mcpforge.agents.architect import ArchitectInput, WorkflowArchitect
+    from mcpforge.indexing.indexer import build_index
+    from mcpforge.models.analysis import CodebaseAnalysis
+
+    index = build_index(DEMO)
+    analysis = CodebaseAnalysis.model_validate(
+        {
+            "framework": "next.js",
+            "summary": "hotel",
+            "workflows": [
+                {
+                    "id": "cancel",
+                    "name": "Cancel",
+                    "description": "cancel a booking",
+                    "risk": "DESTRUCTIVE",
+                    "primary_function": "cancelReservation",
+                    "evidence": [{"path": "src/lib/reservations.ts"}],
+                    "confidence": 0.9,
+                }
+            ],
+        }
+    )
+
+    proposal = tool(risk="READ")
+    proposal.pop("approval_required")
+    agent = WorkflowArchitect(FakeGeminiProvider([{"tools": [proposal], "notes": []}]))
+
+    reconciled, discrepancies, record = await agent.design(
+        ArchitectInput(index=index, analysis=analysis, selected_workflow_ids=["cancel"]), TRACE
+    )
+
+    assert reconciled.tools[0].risk.value == "DESTRUCTIVE"
+    assert reconciled.tools[0].approval_required is True
+    assert discrepancies and "stricter" in discrepancies[0].reason
+    assert any("stricter" in note for note in record.notes)
+    assert evaluate_gate(report(advisory_pass=True), reconciled).passed is True

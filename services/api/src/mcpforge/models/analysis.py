@@ -29,11 +29,15 @@ class RiskClass(StrEnum):
 
 
 class Evidence(BaseModel):
-    """Where a claim comes from. Checked against the index, never trusted."""
+    """Where a claim comes from. Checked against the index, never trusted.
 
-    path: str = Field(min_length=1)
-    symbol: str | None = None
-    line: int | None = None
+    Bounded like every other model-facing string: these values are quoted back
+    in rejection messages, which end up on the activity timeline.
+    """
+
+    path: str = Field(min_length=1, max_length=400)
+    symbol: str | None = Field(default=None, max_length=200)
+    line: int | None = Field(default=None, ge=1)
 
 
 class BusinessOperation(BaseModel):

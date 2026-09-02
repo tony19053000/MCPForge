@@ -48,16 +48,26 @@ async def make_session(store: InMemoryStore, state: RunState) -> Session:
     return await store.create_session(Session(project_id=project.id, owner_uid=OWNER, state=state))
 
 
-def approved(gate: ApprovalGate, hash_: str = PLAN_HASH) -> Approval:
-    return Approval(
-        project_id="p",
-        session_id="s",
-        gate=gate,
-        artifact_hash=hash_,
-        summary="x",
-        status=ApprovalStatus.APPROVED,
-        actor_uid=OWNER,
-        decided_at=utcnow(),
+async def store_approval(
+    store: InMemoryStore,
+    session: Session,
+    gate: ApprovalGate,
+    hash_: str = PLAN_HASH,
+    *,
+    status: ApprovalStatus = ApprovalStatus.APPROVED,
+) -> Approval:
+    """Persist a real approval for this session, as the API would."""
+    return await store.create_approval(
+        Approval(
+            project_id=session.project_id,
+            session_id=session.id,
+            gate=gate,
+            artifact_hash=hash_,
+            summary="x",
+            status=status,
+            actor_uid=OWNER if status is not ApprovalStatus.PENDING else None,
+            decided_at=utcnow() if status is not ApprovalStatus.PENDING else None,
+        )
     )
 
 
@@ -123,13 +133,14 @@ async def test_a_matching_approval_opens_the_gate(
     store: InMemoryStore, machine: RunMachine
 ) -> None:
     session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    approval = await store_approval(store, session, ApprovalGate.TOOL_PLAN)
     updated = await machine.transition(
         session,
         RunState.TOOL_PLAN_APPROVED,
         actor=OWNER,
         origin=Origin.HUMAN,
         cause="developer approved the plan",
-        approval=approved(ApprovalGate.TOOL_PLAN),
+        approval_id=approval.id,
         artifact_hash=PLAN_HASH,
     )
     assert updated.state is RunState.TOOL_PLAN_APPROVED
@@ -138,8 +149,10 @@ async def test_a_matching_approval_opens_the_gate(
 async def test_a_pending_approval_does_not_open_the_gate(
     store: InMemoryStore, machine: RunMachine
 ) -> None:
-    pending = approved(ApprovalGate.TOOL_PLAN).model_copy(update={"status": ApprovalStatus.PENDING})
     session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    pending = await store_approval(
+        store, session, ApprovalGate.TOOL_PLAN, status=ApprovalStatus.PENDING
+    )
     with pytest.raises(ApprovalRequiredError):
         await machine.transition(
             session,
@@ -147,7 +160,7 @@ async def test_a_pending_approval_does_not_open_the_gate(
             actor=OWNER,
             origin=Origin.HUMAN,
             cause="x",
-            approval=pending,
+            approval_id=pending.id,
             artifact_hash=PLAN_HASH,
         )
 
@@ -155,10 +168,10 @@ async def test_a_pending_approval_does_not_open_the_gate(
 async def test_a_rejected_approval_does_not_open_the_gate(
     store: InMemoryStore, machine: RunMachine
 ) -> None:
-    rejected = approved(ApprovalGate.TOOL_PLAN).model_copy(
-        update={"status": ApprovalStatus.REJECTED}
-    )
     session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    rejected = await store_approval(
+        store, session, ApprovalGate.TOOL_PLAN, status=ApprovalStatus.REJECTED
+    )
     with pytest.raises(ApprovalRequiredError):
         await machine.transition(
             session,
@@ -166,7 +179,7 @@ async def test_a_rejected_approval_does_not_open_the_gate(
             actor=OWNER,
             origin=Origin.HUMAN,
             cause="x",
-            approval=rejected,
+            approval_id=rejected.id,
             artifact_hash=PLAN_HASH,
         )
 
@@ -177,6 +190,7 @@ async def test_regenerating_the_artifact_closes_the_gate_again(
     """The reason approvals carry a hash: approving a plan is not approving a
     different plan."""
     session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    approval = await store_approval(store, session, ApprovalGate.TOOL_PLAN)
     changed = artifact_hash({"tools": ["search_rooms", "cancel_reservation", "delete_account"]})
     with pytest.raises(ApprovalRequiredError):
         await machine.transition(
@@ -185,7 +199,7 @@ async def test_regenerating_the_artifact_closes_the_gate_again(
             actor=OWNER,
             origin=Origin.HUMAN,
             cause="x",
-            approval=approved(ApprovalGate.TOOL_PLAN),
+            approval_id=approval.id,
             artifact_hash=changed,
         )
 
@@ -194,6 +208,7 @@ async def test_an_approval_for_another_gate_does_not_open_this_one(
     store: InMemoryStore, machine: RunMachine
 ) -> None:
     session = await make_session(store, RunState.PATCH_APPROVAL_PENDING)
+    wrong_gate = await store_approval(store, session, ApprovalGate.TOOL_PLAN)
     with pytest.raises(ApprovalRequiredError):
         await machine.transition(
             session,
@@ -201,7 +216,7 @@ async def test_an_approval_for_another_gate_does_not_open_this_one(
             actor=OWNER,
             origin=Origin.HUMAN,
             cause="x",
-            approval=approved(ApprovalGate.TOOL_PLAN),
+            approval_id=wrong_gate.id,
             artifact_hash=PLAN_HASH,
         )
 
@@ -311,21 +326,20 @@ async def test_the_full_pipeline_cannot_be_walked_without_three_approvals(
             session, target, actor="system", origin=Origin.SYSTEM, cause="step"
         )
 
-    gated: list[tuple[RunState, ApprovalGate, str]] = [
-        (RunState.TOOL_PLAN_APPROVED, ApprovalGate.TOOL_PLAN, PLAN_HASH),
-    ]
-    for target, gate, hash_ in gated:
-        with pytest.raises(ApprovalRequiredError):
-            await machine.transition(session, target, actor=OWNER, origin=Origin.HUMAN, cause="try")
-        session = await machine.transition(
-            session,
-            target,
-            actor=OWNER,
-            origin=Origin.HUMAN,
-            cause="approved",
-            approval=approved(gate, hash_),
-            artifact_hash=hash_,
+    with pytest.raises(ApprovalRequiredError):
+        await machine.transition(
+            session, RunState.TOOL_PLAN_APPROVED, actor=OWNER, origin=Origin.HUMAN, cause="try"
         )
+    plan_approval = await store_approval(store, session, ApprovalGate.TOOL_PLAN, PLAN_HASH)
+    session = await machine.transition(
+        session,
+        RunState.TOOL_PLAN_APPROVED,
+        actor=OWNER,
+        origin=Origin.HUMAN,
+        cause="approved",
+        approval_id=plan_approval.id,
+        artifact_hash=PLAN_HASH,
+    )
 
     for target in [
         RunState.GENERATION_RUNNING,
@@ -342,13 +356,14 @@ async def test_the_full_pipeline_cannot_be_walked_without_three_approvals(
         await machine.transition(
             session, RunState.PATCH_APPROVED, actor=OWNER, origin=Origin.HUMAN, cause="try"
         )
+    patch_approval = await store_approval(store, session, ApprovalGate.PATCH, patch_hash)
     session = await machine.transition(
         session,
         RunState.PATCH_APPROVED,
         actor=OWNER,
         origin=Origin.HUMAN,
         cause="approved",
-        approval=approved(ApprovalGate.PATCH, patch_hash),
+        approval_id=patch_approval.id,
         artifact_hash=patch_hash,
     )
 
@@ -365,13 +380,14 @@ async def test_the_full_pipeline_cannot_be_walked_without_three_approvals(
         await machine.transition(
             session, RunState.PR_APPROVED, actor=OWNER, origin=Origin.HUMAN, cause="try"
         )
+    pr_approval = await store_approval(store, session, ApprovalGate.PULL_REQUEST, pr_hash)
     session = await machine.transition(
         session,
         RunState.PR_APPROVED,
         actor=OWNER,
         origin=Origin.HUMAN,
         cause="approved",
-        approval=approved(ApprovalGate.PULL_REQUEST, pr_hash),
+        approval_id=pr_approval.id,
         artifact_hash=pr_hash,
     )
 
@@ -381,3 +397,90 @@ async def test_the_full_pipeline_cannot_be_walked_without_three_approvals(
         )
 
     assert session.state is RunState.COMPLETE
+
+
+# -- the gate must read the store, not the caller ---------------------------
+
+
+async def test_an_approval_that_was_never_stored_does_not_open_a_gate(
+    store: InMemoryStore, machine: RunMachine
+) -> None:
+    """An earlier version took an Approval object and trusted it.
+
+    Anything that could call transition() could construct one. The record now
+    comes from the store, so an id that is not in it opens nothing.
+    """
+    session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    with pytest.raises(ApprovalRequiredError):
+        await machine.transition(
+            session,
+            RunState.TOOL_PLAN_APPROVED,
+            actor=OWNER,
+            origin=Origin.HUMAN,
+            cause="fabricated",
+            approval_id="appr_never_persisted",
+            artifact_hash=PLAN_HASH,
+        )
+    assert (await store.get_session(session.id, OWNER)).state is RunState.TOOL_PLAN_APPROVAL_PENDING
+
+
+async def test_an_approval_from_another_session_does_not_open_this_gate(
+    store: InMemoryStore, machine: RunMachine
+) -> None:
+    """The artifact hash is content-derived, so two runs over the same
+    repository produce the same hash. Without a session check, an approval from
+    one run would silently open the gate in another.
+    """
+    victim = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    other = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+
+    # Same gate, same hash, genuinely approved — but for a different session.
+    foreign = await store_approval(store, other, ApprovalGate.TOOL_PLAN, PLAN_HASH)
+
+    with pytest.raises(ApprovalRequiredError):
+        await machine.transition(
+            victim,
+            RunState.TOOL_PLAN_APPROVED,
+            actor=OWNER,
+            origin=Origin.HUMAN,
+            cause="reused approval",
+            approval_id=foreign.id,
+            artifact_hash=PLAN_HASH,
+        )
+
+
+async def test_an_approval_belonging_to_another_user_is_not_visible(
+    store: InMemoryStore, machine: RunMachine
+) -> None:
+    """Loading goes through the store's ownership check, so a stranger's
+    approval is not merely rejected — it cannot be read at all."""
+    stranger_project = await store.create_project(Project(owner_uid="uid-stranger", name="x"))
+    stranger_session = await store.create_session(
+        Session(project_id=stranger_project.id, owner_uid="uid-stranger")
+    )
+    stranger_approval = await store_approval(
+        store, stranger_session, ApprovalGate.TOOL_PLAN, PLAN_HASH
+    )
+
+    session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    with pytest.raises(ApprovalRequiredError):
+        await machine.transition(
+            session,
+            RunState.TOOL_PLAN_APPROVED,
+            actor=OWNER,
+            origin=Origin.HUMAN,
+            cause="someone else's approval",
+            approval_id=stranger_approval.id,
+            artifact_hash=PLAN_HASH,
+        )
+
+
+def test_transition_takes_an_approval_id_not_an_approval_object() -> None:
+    """Structural: there is no parameter through which a caller could hand in a
+    record it made up."""
+    import inspect
+
+    params = inspect.signature(RunMachine.transition).parameters
+    assert "approval_id" in params
+    assert "approval" not in params
+    assert params["approval_id"].annotation in ("str | None", str | None)
