@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**40%** — Phase 3 complete, verified by `[REVIEWER / TESTER]` on round 3.
+**50%** — Phase 4 complete, verified by `[REVIEWER / TESTER]` on round 3. Halfway.
 
 ## Current phase
 
-**Phase 4 — Six-Agent Orchestration (40% → 50%)** — implemented, in review.
+**Phase 5 — WebMCP Transformation Engine (50% → 60%)** — not yet started.
 
 ## Current ticket
 
-`F4-01`..`F4-05` — `IN_REVIEW`
+`F5-01` — WebMCP tool contract model — `PENDING`
 
 ---
 
@@ -47,20 +47,19 @@
 | F3-06 | Context retrieval | PASS (round 3) |
 | F3-07 | Demo project ingestion | PASS (round 3) |
 | F3-08 | Firestore store adapter | PASS (round 3) — verified live |
+| F4-01 | Agent framework and base contract | PASS (round 3) |
+| F4-02 | Codebase Analyst | PASS (round 3) — verified live against Gemini |
+| F4-03 | Workflow Architect | PASS (round 3) |
+| F4-04 | Security Reviewer and Human Interaction | PASS (round 3) |
+| F4-05 | Orchestrator and state machine | PASS (round 3) |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F4-01 | Agent framework and base contract | `IN_REVIEW` |
-| F4-02 | Codebase Analyst | `IN_REVIEW` — verified live against Gemini |
-| F4-03 | Workflow Architect | `IN_REVIEW` |
-| F4-04 | Security Reviewer and Human Interaction | `IN_REVIEW` |
-| F4-05 | Orchestrator and state machine | `IN_REVIEW` |
+None.
 
 ## Pending
 
-Phases 4–9, tickets `F4-01` through `F9-05`, including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
+Phases 5–9, tickets `F5-01` through `F9-05`, including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -121,7 +120,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`e1976e1` — `docs: close Phase 3 at 40% after reviewer PASS`
+`453e987` — `docs: close Phase 4 at 50% after reviewer PASS`
 
 Phase 3 spans `20008e5` (F3-03/F3-04), `b93ab1a` (F3-01), `28da5ba` (F3-02/05/06/07), `d37fd5b` (F3-08) and `6856628` (review fixes). Earlier phases: Phase 2 `25555f7`..`c7937cd`, Phase 1 `f744be7`..`7754003`, Phase 0 `1430751`, `49e0162`.
 
@@ -411,3 +410,73 @@ with full fields and a scope note on the ticket it left.
 
 **Next intended task.** `F4-01` — the agent base contract, then the six runtime
 agents and the orchestrator that finally consults the transition table.
+
+### 0007 — Phase 4: six-agent orchestration
+
+**What was built.** The reasoning layer, and the deterministic spine that keeps
+it from being trusted with anything.
+
+- `agents/base.py` — one shape for every agent. A subclass supplies an
+  instruction, a prompt and an optional verify hook, and never touches the
+  provider.
+- `agents/analyst.py` — Agent 1. Finds workflows; every claim resolves against
+  the index or the agent is made to try again.
+- `agents/architect.py` — Agent 2, plus `infer_risk_from_function` and
+  `reconcile_risk`.
+- `agents/security_reviewer.py` — Agent 4, plus `policy_findings` and
+  `evaluate_gate`, the deterministic half.
+- `agents/interaction.py` — Agent 6, plus `commit_decision` and `gate_is_open`.
+- `orchestration/machine.py` — the enforcement point for §6.
+- `models/analysis.py`, `models/toolplan.py`, `models/security.py`.
+
+**618 tests** — 130 web, 488 API. Agent 1 verified live against Gemini on the
+real demo app: four workflows, correct risk classes, all evidence resolving.
+
+**Decisions worth keeping.**
+
+1. **A subclass cannot reach the provider.** Enforced by an AST test, not by
+   convention: no agent may override `run()`, call `generate_structured`, or
+   touch `self._provider`. Otherwise an agent could skip validation entirely.
+2. **The structural half is not asked of the model.** Routes, handlers, services
+   and the call graph come from the indexer and are given *to* Agent 1. Asking a
+   model to restate facts we hold exactly adds a way to be wrong for no gain.
+3. **Risk is re-derived, never read.** `policy_findings` computes risk from the
+   mapped function itself and does not assume `reconcile_risk` has run.
+   `approval_required` is absent from the schema Gemini is given, so there is
+   nowhere for a model to claim a tool is safe.
+4. **Gates load approvals from the store by id.** Never an object handed in by a
+   caller, and the record must belong to this session *and* this project.
+5. **`WorkflowArchitect.design()` is the only way to get a plan**, so
+   reconciliation cannot be skipped by forgetting a step.
+
+**Review record — three rounds.**
+
+Round 1: eight defects, two of them real holes. Gates took an `Approval` object
+and trusted it, so anything able to call `transition()` could fabricate one —
+and because the artifact hash is content-derived, an approval from another run
+over the same repository carried the same hash. Separately, the "deterministic"
+policy check read `tool.risk` and `tool.approval_required`, both model-filled,
+while a comment claimed otherwise and `reconcile_risk` had no caller at all.
+
+Round 2: four defects, three of them edits I had reported as made that silently
+missed. The fourth was worse: my test named "approval from another session" put
+the two sessions in different projects, so the project check passed it and the
+session check was never exercised — the round-1 hole was still open behind a
+test that looked like it covered it.
+
+Round 3: PASS, with 38 mutations and one survivor, that one fail-safe.
+
+**A note on process.** Twice now I have reported an edit as made without
+re-reading the file, and once claimed "mutation-verified every fix" when two
+were untested. Both were caught. Verify the file after editing it, and do not
+write that something is verified unless the mutation was actually run.
+
+**What NOT to change accidentally.** The AST bypass test in
+`test_agent_base.py`. The store lookup and the session/project binding in
+`_require_approval` — each half is pinned by its own test. `policy_findings`
+re-deriving risk. `ProposedTool` lacking `approval_required`. `LongRejectionAgent`
+and `PermissiveStore` — both deliberately unusual, and deleting either silently
+disables the property it protects.
+
+**Next intended task.** `F5-01` — the WebMCP tool contract model, then Agent 3,
+the generator that writes the actual integration code.
