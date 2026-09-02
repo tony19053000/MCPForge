@@ -1,6 +1,12 @@
+import Link from "next/link";
 import type { Room } from "@/lib/types";
 
-export function RoomCard({ room, onSelect }: { room: Room; onSelect: (id: string) => void }) {
+/**
+ * Presentational, and deliberately server-renderable: it takes data and renders
+ * a link, not a callback. A server component cannot pass an event handler to a
+ * child, which is what an earlier version tried to do.
+ */
+export function RoomCard({ room }: { room: Room }) {
   return (
     <article>
       <h3>{room.name}</h3>
@@ -11,9 +17,7 @@ export function RoomCard({ room, onSelect }: { room: Room; onSelect: (id: string
           <li key={a}>{a}</li>
         ))}
       </ul>
-      <button type="button" onClick={() => onSelect(room.id)}>
-        Select
-      </button>
+      <Link href={`/book?room=${room.id}`}>Select this room</Link>
     </article>
   );
 }

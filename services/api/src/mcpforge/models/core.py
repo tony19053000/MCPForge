@@ -103,6 +103,10 @@ class Project(BaseModel):
     base_branch: str | None = None
     access_mode: AccessMode = AccessMode.READ_ONLY
     created_at: datetime = Field(default_factory=utcnow)
+    # Who widened access and when. 03_SECURITY_ACCESS.md §5 requires the record,
+    # so an elevation is auditable rather than merely effective.
+    elevated_by: str | None = None
+    elevated_at: datetime | None = None
 
     @property
     def is_demo(self) -> bool:

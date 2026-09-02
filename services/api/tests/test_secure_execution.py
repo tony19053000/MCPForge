@@ -6,7 +6,11 @@ and nothing here may ever claim hardware attestation.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
 import pathlib
+import signal
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -17,6 +21,7 @@ from mcpforge.execution.provider import (
     Command,
     CommandNotAllowedError,
     PathEscapeError,
+    SandboxError,
     SecureExecutionProvider,
     TrustLevel,
     Workspace,
@@ -262,3 +267,216 @@ async def test_destroy_is_safe_to_call_twice(executor: DevelopmentSecureExecutor
     ws = await executor.create_workspace(WorkspaceSpec(run_id="run-y"))
     await executor.destroy(ws)
     await executor.destroy(ws)
+
+
+# -- network isolation ------------------------------------------------------
+
+
+async def test_a_job_is_denied_the_network_by_default(
+    executor: DevelopmentSecureExecutor, workspace: Workspace
+) -> None:
+    """03_SECURITY_ACCESS.md §3 — no outbound network from analysis commands.
+
+    Previously `allow_network` was declared and never read, so this control was
+    documented in three places and enforced in none.
+    """
+    if not executor.network_isolation_available:
+        pytest.skip("this machine cannot create unprivileged network namespaces")
+
+    result = await executor.run(
+        workspace,
+        Command(
+            argv=(
+                "python3",
+                "-c",
+                "import socket\n"
+                "try:\n"
+                "    socket.create_connection(('1.1.1.1', 53), timeout=3)\n"
+                "    print('REACHABLE')\n"
+                "except OSError as e:\n"
+                "    print('BLOCKED', e.errno)\n",
+            ),
+            timeout_seconds=20,
+        ),
+    )
+    assert "REACHABLE" not in result.stdout
+    assert "BLOCKED" in result.stdout
+
+
+async def test_the_clone_step_may_have_the_network(
+    executor: DevelopmentSecureExecutor,
+) -> None:
+    """Cloning is the one networked operation, so it must be expressible."""
+    ws = await executor.create_workspace(WorkspaceSpec(run_id="net", allow_network=True))
+    try:
+        assert ws.allow_network is True
+        result = await executor.run(
+            ws,
+            Command(
+                argv=(
+                    "python3",
+                    "-c",
+                    "import socket\n"
+                    "try:\n"
+                    "    socket.create_connection(('1.1.1.1', 53), timeout=5)\n"
+                    "    print('REACHABLE')\n"
+                    "except OSError:\n"
+                    "    print('BLOCKED')\n",
+                ),
+                timeout_seconds=20,
+            ),
+        )
+        assert "REACHABLE" in result.stdout
+    finally:
+        await executor.destroy(ws)
+
+
+async def test_an_isolation_less_machine_is_refused_rather_than_quietly_downgraded(
+    tmp_path: Path,
+) -> None:
+    """Running with network access while claiming isolation is the worse outcome."""
+    executor = DevelopmentSecureExecutor(workspace_root=tmp_path / "ws")
+    executor._network_isolation = False  # simulate a kernel without unprivileged userns
+    ws = await executor.create_workspace(WorkspaceSpec(run_id="x"))
+    try:
+        with pytest.raises(SandboxError, match="cannot be denied the network"):
+            await executor.run(ws, Command(argv=("python3", "-c", "pass")))
+    finally:
+        await executor.destroy(ws)
+
+
+async def test_the_weaker_boundary_can_be_accepted_knowingly(tmp_path: Path) -> None:
+    executor = DevelopmentSecureExecutor(
+        workspace_root=tmp_path / "ws", require_network_isolation=False
+    )
+    executor._network_isolation = False
+    ws = await executor.create_workspace(WorkspaceSpec(run_id="x"))
+    try:
+        result = await executor.run(ws, Command(argv=("python3", "-c", "print('ran')")))
+        assert result.ok
+    finally:
+        await executor.destroy(ws)
+
+
+# -- the wall clock, including forked children ------------------------------
+
+
+async def test_a_forked_grandchild_is_killed_too_not_left_running(
+    executor: DevelopmentSecureExecutor, workspace: Workspace
+) -> None:
+    """The wall clock must kill the whole process group.
+
+    Killing only the direct child leaves grandchildren alive — git's https
+    helper, npm, next all fork — so a timed-out job keeps consuming the machine
+    and holding its output pipes. Asserting the grandchild is gone is the only
+    way to tell the two apart; a run that merely *returns* looks identical.
+    """
+    pid_file = workspace.root / "grandchild.pid"
+    result = await asyncio.wait_for(
+        executor.run(
+            workspace,
+            Command(
+                argv=(
+                    "python3",
+                    "-c",
+                    "import subprocess, sys, os, time\n"
+                    "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+                    f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
+                    "time.sleep(120)\n",
+                ),
+                timeout_seconds=3,
+            ),
+        ),
+        timeout=40,
+    )
+    assert result.timed_out is True
+
+    grandchild_pid = int(pid_file.read_text())
+    await asyncio.sleep(0.5)
+    still_alive = True
+    try:
+        os.kill(grandchild_pid, 0)
+    except ProcessLookupError:
+        still_alive = False
+    except PermissionError:  # pragma: no cover - reparented but alive
+        still_alive = True
+
+    if still_alive:  # pragma: no cover - cleanup only on failure
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(grandchild_pid, signal.SIGKILL)
+    assert not still_alive, (
+        f"grandchild {grandchild_pid} survived the timeout; the process group was not killed"
+    )
+
+
+# -- resource limits --------------------------------------------------------
+
+
+async def test_the_memory_limit_is_enforced(tmp_path: Path) -> None:
+    """A surviving mutation showed preexec_fn could be dropped entirely with no
+    test noticing, while STATUS advertised memory limits."""
+    executor = DevelopmentSecureExecutor(workspace_root=tmp_path / "ws", memory_mb=64)
+    ws = await executor.create_workspace(WorkspaceSpec(run_id="mem"))
+    try:
+        result = await executor.run(
+            ws,
+            Command(
+                argv=("python3", "-c", "x = bytearray(200 * 1024 * 1024); print('ALLOCATED')"),
+                timeout_seconds=30,
+            ),
+        )
+        assert "ALLOCATED" not in result.stdout
+        assert result.ok is False
+    finally:
+        await executor.destroy(ws)
+
+
+async def test_the_cpu_limit_is_enforced(tmp_path: Path) -> None:
+    """Killed by RLIMIT_CPU, not by the wall clock: the timeout is far longer."""
+    executor = DevelopmentSecureExecutor(workspace_root=tmp_path / "ws", cpu_seconds=1)
+    ws = await executor.create_workspace(WorkspaceSpec(run_id="cpu"))
+    try:
+        result = await executor.run(
+            ws,
+            Command(argv=("python3", "-c", "\nwhile True:\n    pass\n"), timeout_seconds=60),
+        )
+        assert result.timed_out is False, "should die on CPU, not on the wall clock"
+        assert result.ok is False
+    finally:
+        await executor.destroy(ws)
+
+
+# -- lifecycle guarantees ---------------------------------------------------
+
+
+async def test_the_workspace_context_manager_destroys_on_success(
+    executor: DevelopmentSecureExecutor,
+) -> None:
+    async with executor.workspace(WorkspaceSpec(run_id="ctx-ok")) as ws:
+        (ws.root / "file.txt").write_text("data")
+        root = ws.root
+    assert not root.exists()
+
+
+async def test_the_workspace_is_destroyed_even_when_the_job_raises(
+    executor: DevelopmentSecureExecutor,
+) -> None:
+    """The path that raises is exactly the one that would otherwise leave a
+    checkout of someone's private source on the disk."""
+    root: Path | None = None
+    with pytest.raises(RuntimeError, match="analysis blew up"):
+        async with executor.workspace(WorkspaceSpec(run_id="ctx-fail")) as ws:
+            root = ws.root
+            (ws.root / "cloned.ts").write_text("export const secret = 1;")
+            raise RuntimeError("analysis blew up")
+    assert root is not None
+    assert not root.exists()
+
+
+async def test_the_context_manager_passes_the_network_policy_through(
+    executor: DevelopmentSecureExecutor,
+) -> None:
+    async with executor.workspace(WorkspaceSpec(run_id="ctx-net", allow_network=True)) as ws:
+        assert ws.allow_network is True
+    async with executor.workspace(WorkspaceSpec(run_id="ctx-nonet")) as ws:
+        assert ws.allow_network is False

@@ -6,8 +6,9 @@ export default function HomePage() {
   return (
     <main>
       <h1>Seaside Hotel</h1>
+      <p>{rooms.length} room types available</p>
       {rooms.map((room) => (
-        <RoomCard key={room.id} room={room} onSelect={() => {}} />
+        <RoomCard key={room.id} room={room} />
       ))}
     </main>
   );

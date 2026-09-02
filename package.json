@@ -5,7 +5,8 @@
   "description": "AI-native developer workspace that transforms web applications into safe, testable, WebMCP-compatible applications.",
   "license": "MIT",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "fixtures/*"
   ],
   "engines": {
     "node": ">=20.11"
@@ -13,13 +14,15 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
     "api:dev": "cd services/api && uv run uvicorn mcpforge.main:app --reload",
-    "typecheck": "npm run typecheck --workspace=apps/web && npm run api:typecheck",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm run api:typecheck",
     "lint": "npm run lint --workspace=apps/web && npm run api:lint",
     "test": "npm run test --workspace=apps/web && npm run api:test",
     "build": "npm run build --workspace=apps/web",
     "format": "cd services/api && uv run ruff format .",
     "api:typecheck": "cd services/api && uv run mypy",
     "api:lint": "cd services/api && uv run ruff check . && uv run ruff format --check .",
-    "api:test": "cd services/api && uv run pytest -q"
+    "api:test": "cd services/api && uv run pytest -q",
+    "fixture:typecheck": "npm run typecheck --workspace=fixtures/demo-hotel-app",
+    "fixture:build": "npm run build --workspace=fixtures/demo-hotel-app"
   }
 }

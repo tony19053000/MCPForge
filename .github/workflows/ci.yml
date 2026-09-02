@@ -29,6 +29,21 @@ jobs:
       - run: npm run lint --workspace=apps/web
       - run: npm run test --workspace=apps/web
       - run: npm run build --workspace=apps/web
+
+  fixture:
+    name: Demo fixture (typecheck · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # The fixture is what every later phase indexes and generates against.
+      # If it stops building, those phases are testing against a broken app.
+      - run: npm run typecheck --workspace=fixtures/demo-hotel-app
+      - run: npm run build --workspace=fixtures/demo-hotel-app
       - name: Client bundle carries no server credential
         # The Firebase Web config is public by design and is expected here.
         # The Gemini key, a model SDK, or any private-key material is not.

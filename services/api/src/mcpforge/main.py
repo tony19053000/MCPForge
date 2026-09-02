@@ -8,12 +8,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mcpforge.api import approvals, chat, health, me, projects
+from mcpforge.api import approvals, chat, health, me, projects, repos
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
 from mcpforge.config import Settings, get_settings
 from mcpforge.gemini.google_provider import GoogleGenAIProvider
 from mcpforge.gemini.provider import GeminiProvider
+from mcpforge.github.client import GitHubAppClient
 from mcpforge.logging import configure_logging, get_logger
 from mcpforge.store.memory import InMemoryStore
 from mcpforge.store.port import Store
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.mcpforge_env.value,
         auth_configured=settings.auth_configured,
         gemini_configured=settings.gemini_configured,
+        github_configured=settings.github_configured,
         secure_executor=settings.secure_executor.value,
     )
     if not settings.auth_configured:
@@ -47,6 +49,7 @@ def create_app(
     token_verifier: TokenVerifier | None = None,
     store: Store | None = None,
     gemini: GeminiProvider | None = None,
+    github: GitHubAppClient | None = None,
 ) -> FastAPI:
     """Build the application.
 
@@ -72,6 +75,10 @@ def create_app(
     # In-memory is the Phase 2 store. Firestore lands behind the same port later.
     app.state.store = store or InMemoryStore()
     app.state.gemini = gemini or GoogleGenAIProvider(settings)
+    app.state.github = github or GitHubAppClient(
+        app_id=settings.github_app_id,
+        private_key_path=settings.github_app_private_key_path,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -86,6 +93,7 @@ def create_app(
     app.include_router(projects.router)
     app.include_router(chat.router)
     app.include_router(approvals.router)
+    app.include_router(repos.router)
     return app
 
 

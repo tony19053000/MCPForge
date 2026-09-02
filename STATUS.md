@@ -10,11 +10,11 @@
 
 ## Current phase
 
-**Phase 3 — GitHub + Safe Repository Ingestion (30% → 40%)** — not yet started.
+**Phase 3 — GitHub + Safe Repository Ingestion (30% → 40%)** — implemented, in review.
 
 ## Current ticket
 
-`F3-03` and `F3-04` implemented; `F3-01` blocked on the GitHub App (B-03).
+`F3-01`..`F3-08` — `IN_REVIEW`
 
 ---
 
@@ -42,7 +42,16 @@
 
 ## In progress
 
-None.
+| Ticket | Title | Status |
+|---|---|---|
+| F3-01 | GitHub App integration | `IN_REVIEW` — verified live |
+| F3-02 | Repository selection and boundary binding | `IN_REVIEW` |
+| F3-03 | Secret and path filtering | `IN_REVIEW` |
+| F3-04 | Secure execution provider (development) | `IN_REVIEW` |
+| F3-05 | Repository indexer | `IN_REVIEW` |
+| F3-06 | Context retrieval | `IN_REVIEW` |
+| F3-07 | Demo project ingestion | `IN_REVIEW` |
+| F3-08 | Firestore store adapter | `IN_REVIEW` — verified against the live database |
 
 ## Pending
 
@@ -59,7 +68,7 @@ Phases 3–9, tickets `F3-01` through `F9-05`, including `F3-08` (Firestore adap
 | B-01 | ~~No Gemini API key~~ — **resolved** | Key supplied and verified with a real structured call and a real stream against `gemini-3.7-flash`. Vertex/ADC is also implemented as a no-secret alternative | Closed |
 | B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally (quota project `launchforge-tee`) | Closed |
 | B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
-| B-03 | No GitHub App registered | Phase 3 client can be built and unit-tested against a mocked API; real installation needs the App | Open — needs owner to register the App and supply id + private key |
+| B-03 | ~~No GitHub App~~ — **resolved** | App 4797679 registered and installed on `tony19053000`, scoped to selected repositories. Verified live: contents=write, pull_requests=write, metadata=read, and nothing else | Closed |
 | B-04 | No GCP Confidential Space infrastructure | Ticket `F8-02` cannot be completed and is marked `BLOCKED`. **It will not be simulated or marked done.** Development isolation continues to work and is labelled honestly | Open — expected; Phase 8 |
 
 None of these block Phase 1. Work continues on everything that can be built and tested without them.
@@ -70,7 +79,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **442 passing** — 130 web (Vitest/RTL), 312 API (pytest). A further 15 run against live Firestore when opted in |
+| Unit | **494 passing** — 130 web (Vitest/RTL), 364 API (pytest). A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -91,9 +100,10 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
 | Chain-of-thought | Never sent by the API and never rendered by the UI. Both tiers assert it independently |
 | Attestation | **Not implemented, not simulated.** An AST-based test asserts `HARDWARE_ATTESTED` appears nowhere in backend code except as an enum member |
-| Secret filtering | Implemented. A fixture repository with eleven planted credentials yields zero secret bytes downstream, and none in the quarantine records either. Quarantined files are never opened |
-| Repository access mode | Not implemented. Default will be `READ_ONLY` |
-| Branch protection | Not implemented. Writer will be branch + PR only |
+| Secret filtering | Implemented. A fixture repository with thirteen planted credentials yields zero secret bytes downstream, and none in the quarantine records either. Quarantined files are never opened, and matching is case-folded — an earlier version read `.ENV`, `ID_RSA` and `Server.PEM` |
+| Network isolation | Real, via an unprivileged user+network namespace. Where the kernel disallows it the executor refuses to run rather than claiming an isolation it lacks |
+| Repository access mode | Implemented. `READ_ONLY` by default; elevation requires the project owner and records who and when; a demo project can never be elevated |
+| Branch protection | Writer not built yet (F6-02). The boundary that will guard it is implemented: one assertion helper every repository operation calls, refusing rebinding and refusing any repository other than the bound one |
 | Credentials in repository | None. `.env` ignored; `.env.example` contains names only |
 | Service-account keys | None, by design. Not created, not committed, not a supported configuration. Server-side Google access uses ADC |
 | Auth posture | Provisional Firebase Auth behind a `TokenVerifier` / `AuthProvider` port pair. Backend imports no Firebase SDK and needs no credentials to verify a token |

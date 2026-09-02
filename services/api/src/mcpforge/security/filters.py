@@ -187,7 +187,14 @@ class FileDecision:
 
 
 def _matches_secret_path(name: str) -> bool:
-    return any(fnmatch(name, pattern) for pattern in SECRET_PATH_PATTERNS)
+    """Case-insensitive on purpose.
+
+    `.ENV`, `ID_RSA` and `Server.PEM` are the same files as their lowercase
+    forms on a case-insensitive filesystem, and are credentials either way. An
+    earlier version matched case-sensitively and read all three.
+    """
+    lowered = name.lower()
+    return any(fnmatch(lowered, pattern.lower()) for pattern in SECRET_PATH_PATTERNS)
 
 
 def classify_path(path: str, *, size_bytes: int, max_bytes: int = 262_144) -> FileDecision:
@@ -199,19 +206,22 @@ def classify_path(path: str, *, size_bytes: int, max_bytes: int = 262_144) -> Fi
     posix = PurePosixPath(path)
     parts = posix.parts
     name = posix.name
+    # Every comparison below is case-folded. Matching case-sensitively meant
+    # `.ENV` and `Secrets/prod.yaml` were opened and indexed.
+    lowered_parts = [p.lower() for p in parts[:-1]]
 
-    for segment in parts[:-1]:
+    for original, segment in zip(parts[:-1], lowered_parts, strict=True):
         if segment in SECRET_DIR_SEGMENTS:
-            return FileDecision(path, Verdict.QUARANTINED_PATH, f"inside '{segment}/'")
+            return FileDecision(path, Verdict.QUARANTINED_PATH, f"inside '{original}/'")
 
     if _matches_secret_path(name):
         return FileDecision(path, Verdict.QUARANTINED_PATH, "credential filename pattern")
 
-    for segment in parts[:-1]:
+    for original, segment in zip(parts[:-1], lowered_parts, strict=True):
         if segment in EXCLUDED_DIRS:
-            return FileDecision(path, Verdict.EXCLUDED_PATH, f"inside '{segment}/'")
+            return FileDecision(path, Verdict.EXCLUDED_PATH, f"inside '{original}/'")
 
-    if name in LOCKFILES:
+    if name.lower() in LOCKFILES:
         return FileDecision(path, Verdict.EXCLUDED_LOCKFILE, "lockfile; presence recorded only")
 
     if posix.suffix.lower() in BINARY_EXTENSIONS:

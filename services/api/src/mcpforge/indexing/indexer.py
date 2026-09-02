@@ -29,6 +29,36 @@ HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 SUPPORTED_FRAMEWORK = "next.js"
 
 
+def detect_router(paths: set[str]) -> str | None:
+    """App Router vs Pages Router, from the tree rather than from a guess."""
+    has_app = any(p.startswith(("app/", "src/app/")) for p in paths)
+    has_pages = any(p.startswith(("pages/", "src/pages/")) for p in paths)
+    if has_app and has_pages:
+        return "app+pages"
+    if has_app:
+        return "app"
+    if has_pages:
+        return "pages"
+    return None
+
+
+#: Lockfile name -> the package manager that writes it.
+PACKAGE_MANAGERS = {
+    "package-lock.json": "npm",
+    "yarn.lock": "yarn",
+    "pnpm-lock.yaml": "pnpm",
+    "bun.lockb": "bun",
+}
+
+
+def detect_package_manager(lockfiles: list[str]) -> str | None:
+    for lockfile in lockfiles:
+        manager = PACKAGE_MANAGERS.get(Path(lockfile).name.lower())
+        if manager:
+            return manager
+    return None
+
+
 def detect_framework(package_json: str | None) -> FrameworkInfo:
     if package_json is None:
         return FrameworkInfo(
@@ -141,6 +171,12 @@ def build_index(root: Path, *, max_bytes: int = 262_144) -> RepositoryIndex:
     known = set(contents)
 
     framework = detect_framework(contents.get("package.json"))
+    framework = framework.model_copy(
+        update={
+            "router": detect_router(known),
+            "package_manager": detect_package_manager(filtered.lockfiles),
+        }
+    )
 
     files: list[FileNode] = []
     for path, text in filtered.included:

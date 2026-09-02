@@ -295,3 +295,87 @@ def test_symlinks_are_not_followed(tmp_path: Path) -> None:
 
     result = filter_tree(tmp_path / "repo")
     assert result.included_paths == []
+
+
+# -- case folding -----------------------------------------------------------
+#
+# An earlier version matched paths case-sensitively, so `.ENV`, `ID_RSA` and
+# `Server.PEM` were opened, read and included. On a case-insensitive filesystem
+# those *are* the lowercase files. Content scanning is no backstop: a key file
+# without a PEM header and a low-entropy password match no pattern.
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".ENV",
+        ".Env",
+        ".ENV.PRODUCTION",
+        ".Env.Local",
+        "ID_RSA",
+        "Id_Rsa",
+        "ID_ED25519",
+        "Server.PEM",
+        "PRIVATE.KEY",
+        "Service-Account.json",
+        "Firebase-AdminSDK-abc.json",
+        "Terraform.TFVARS",
+        ".NPMRC",
+        "Secrets/prod.yaml",
+        "SECRETS/prod.yaml",
+        "Credentials/aws.json",
+        ".SSH/config",
+        ".AWS/credentials",
+        "config/Secrets/db.yaml",
+    ],
+)
+def test_credential_paths_are_quarantined_whatever_their_case(path: str) -> None:
+    assert classify_path(path, size_bytes=100).verdict.is_secret, path
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["NODE_MODULES/react/index.js", "Dist/bundle.js", ".NEXT/static/chunk.js", "Build/main.js"],
+)
+def test_build_output_is_excluded_whatever_its_case(path: str) -> None:
+    assert classify_path(path, size_bytes=100).verdict is Verdict.EXCLUDED_PATH, path
+
+
+@pytest.mark.parametrize("path", ["Package-Lock.json", "YARN.LOCK", "Uv.Lock"])
+def test_lockfiles_are_recognised_whatever_their_case(path: str) -> None:
+    assert classify_path(path, size_bytes=100).verdict is Verdict.EXCLUDED_LOCKFILE, path
+
+
+def test_an_uppercase_credential_file_is_never_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point: not merely excluded from the output, never read at all."""
+    (tmp_path / ".SSH").mkdir()
+    (tmp_path / ".ENV").write_text(f"KEY={PLANTED['gemini_key']}\n")
+    (tmp_path / "ID_RSA").write_text("not-a-pem-header just raw key bytes\n")
+    (tmp_path / ".SSH" / "config").write_text("Host prod\n  User root\n")
+    (tmp_path / "app.ts").write_text("export const a = 1;\n")
+
+    opened: list[str] = []
+    original = Path.read_text
+
+    def spy(self: Path, *args: object, **kwargs: object) -> str:
+        opened.append(self.name)
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", spy)
+    result = filter_tree(tmp_path)
+
+    for name in (".ENV", "ID_RSA", "config"):
+        assert name not in opened, f"{name} was opened despite being a credential path"
+    assert result.included_paths == ["app.ts"]
+
+
+def test_a_key_file_with_no_recognisable_content_is_still_caught(tmp_path: Path) -> None:
+    """Path policy has to hold on its own — content scanning cannot save this one."""
+    (tmp_path / "Server.PEM").write_text("aGVsbG8gd29ybGQgdGhpcyBpcyBub3QgYSBoZWFkZXI=\n")
+    (tmp_path / "app.ts").write_text("export const a = 1;\n")
+
+    result = filter_tree(tmp_path)
+    assert "Server.PEM" in result.quarantined_paths
+    assert "Server.PEM" not in result.included_paths

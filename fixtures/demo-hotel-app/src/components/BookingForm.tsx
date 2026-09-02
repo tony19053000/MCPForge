@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export function BookingForm({ roomId }: { roomId: string }) {
+export function BookingForm({ roomId, maxGuests = 4 }: { roomId: string; maxGuests?: number }) {
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [checkIn, setCheckIn] = useState("");
@@ -30,7 +30,13 @@ export function BookingForm({ roomId }: { roomId: string }) {
       <input value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} placeholder="Email" />
       <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
       <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
-      <input type="number" value={guests} onChange={(e) => setGuests(Number(e.target.value))} />
+      <input
+        type="number"
+        min={1}
+        max={maxGuests}
+        value={guests}
+        onChange={(e) => setGuests(Number(e.target.value))}
+      />
       <button type="submit">Book</button>
       {error ? <p role="alert">{error}</p> : null}
     </form>

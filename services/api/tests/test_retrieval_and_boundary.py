@@ -192,7 +192,7 @@ def test_a_demo_project_can_never_reach_the_writer() -> None:
 
 def test_a_demo_project_can_never_be_elevated() -> None:
     with pytest.raises(NoRepositoryBoundError, match="permanently unable"):
-        elevate_to_write(Project(owner_uid="u1", name="demo"))
+        elevate_to_write(Project(owner_uid="u1", name="demo"), actor_uid="u1")
 
 
 # -- access mode ------------------------------------------------------------
@@ -204,11 +204,42 @@ def test_a_read_only_project_cannot_write() -> None:
 
 
 def test_an_elevated_project_may_write() -> None:
-    assert_may_write(elevate_to_write(bound_project()))
+    assert_may_write(elevate_to_write(bound_project(), actor_uid="u1"))
 
 
 def test_elevation_is_reversible() -> None:
-    elevated = elevate_to_write(bound_project())
+    elevated = elevate_to_write(bound_project(), actor_uid="u1")
     assert revoke_write(elevated).access_mode is AccessMode.READ_ONLY
     with pytest.raises(AccessModeError):
         assert_may_write(revoke_write(elevated))
+
+
+def test_elevation_records_who_did_it_and_when() -> None:
+    """03_SECURITY_ACCESS.md §5 — an elevation must be auditable, not just effective."""
+    elevated = elevate_to_write(bound_project(), actor_uid="u1")
+    assert elevated.elevated_by == "u1"
+    assert elevated.elevated_at is not None
+
+
+def test_elevation_requires_an_authenticated_actor() -> None:
+    with pytest.raises(AccessModeError, match="authenticated user"):
+        elevate_to_write(bound_project(), actor_uid="")
+
+
+def test_only_the_owner_may_widen_access() -> None:
+    with pytest.raises(AccessModeError, match="project owner"):
+        elevate_to_write(bound_project(), actor_uid="uid-stranger")
+
+
+def test_revoking_keeps_the_audit_trail() -> None:
+    """An audit trail that vanishes when access is revoked is not an audit trail."""
+    revoked = revoke_write(elevate_to_write(bound_project(), actor_uid="u1"))
+    assert revoked.access_mode is AccessMode.READ_ONLY
+    assert revoked.elevated_by == "u1"
+    assert revoked.elevated_at is not None
+
+
+def test_a_new_project_has_no_elevation_record() -> None:
+    project = Project(owner_uid="u1", name="fresh")
+    assert project.elevated_by is None
+    assert project.elevated_at is None

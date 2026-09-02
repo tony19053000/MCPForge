@@ -197,11 +197,12 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Purpose.** Scoped repository access that is narrow by construction.
 **Files.** `services/api/src/mcpforge/github/**`
 **Dependencies.** F1-06
-**Implementation.** App JWT → installation token minting (short-lived, never persisted); installation callback handling; repository listing limited to the installation.
+**Implementation.** App JWT → installation token minting (short-lived, never persisted); repository listing limited to the installation.
+**Scope note.** Webhook/callback handling moved to `F6-05` during the Phase 3 review: it needs a publicly reachable URL, which does not exist until deployment, and nothing in Phases 3–5 depends on it. `GITHUB_APP_WEBHOOK_SECRET` stays unset until then.
 **Acceptance criteria.** Only installation-scoped repositories are listed; tokens expire and are re-minted per operation; the private key never appears in a log or a response.
 **Tests.** Unit tests against a mocked GitHub API; test asserting tokens are not persisted; log-redaction test.
 **Security.** T9 control. Account-wide scopes must not be requested — verified against the App manifest during review.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-02 — Repository and branch selection, boundary binding
 **Purpose.** Bind a project to exactly one repository and make every later operation prove it.
@@ -211,7 +212,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Operating on an unbound or mismatched repository is a hard error; access mode starts `READ_ONLY`; rebinding requires an explicit, recorded action.
 **Tests.** Boundary-assertion unit tests; test that no code path rebinds silently; test that a new project defaults to `READ_ONLY`.
 **Security.** T3 and T9 controls.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-03 — Secret and path filtering
 **Purpose.** The control that keeps private source and credentials out of model prompts.
@@ -221,7 +222,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** A fixture repository containing planted secrets yields zero secret bytes downstream of the filter; the quarantine list is path-only; a file with a detected secret is excluded rather than scrubbed and forwarded.
 **Tests.** Fixture repo with planted `.env`, PEM block, JWT, provider-prefixed key and inline connection string; test asserting none reach the index, the retriever, or a prompt builder; ordering test proving filtering runs before indexing.
 **Security.** T1 and T2 controls. This is the highest-consequence ticket in Phase 3.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-04 — Secure execution provider (development)
 **Purpose.** A real isolation boundary for repository jobs, honestly labelled.
@@ -231,7 +232,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Escape attempts (symlink, `..`, absolute path) rejected; CPU/memory/wall-clock/output limits enforced; workspace destroyed on success and on failure; no code path in this implementation can set `HARDWARE_ATTESTED`.
 **Tests.** Sandbox escape tests for each vector; limit-enforcement tests; cleanup-on-exception test; a test asserting `HARDWARE_ATTESTED` is unreachable here.
 **Security.** T6 and T7 controls. No shell string interpolation anywhere.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-05 — Repository indexer
 **Purpose.** Turn a repository into a queryable structure so Gemini never sees a raw dump.
@@ -241,7 +242,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** The index of a real Next.js repository correctly identifies routes, components, API handlers and services; excluded directories are absent; the index contains no file contents; framework detection reports version and router style.
 **Tests.** Integration test against a checked-in fixture Next.js app with known structure; assertion that no file body appears in the serialized index.
 **Security.** Runs only inside the secure executor; filtering applied before parsing.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-06 — Context retrieval
 **Purpose.** The last gate before prompt construction.
@@ -251,7 +252,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Snippets returned are relevant and within budget; quarantined files are never selectable; budget overflow raises a typed error naming what could not fit.
 **Tests.** Ranking tests, budget-enforcement test, quarantine-exclusion test, overflow-raises test.
 **Security.** T1 control, defence in depth behind F3-03.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-07 — Demo project ingestion
 **Purpose.** Let anyone exercise the full pipeline without connecting a private repository, and give every later phase a stable fixture.
@@ -261,7 +262,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** The demo app builds and typechecks on its own; indexing it produces the same shape of `RepositoryIndex` as a GitHub clone; a demo project cannot reach any GitHub write path.
 **Tests.** Build and typecheck of the fixture in CI; index-shape parity test; test that a demo project has no bound repository id and is refused by the PR writer.
 **Security.** A demo project must never be elevatable to `WRITE_PR` — asserted by test.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F3-08 — Firestore store adapter
 **Purpose.** Persist projects, sessions and approvals across restarts, behind the existing port.
@@ -271,7 +272,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Both adapters pass one shared conformance suite; ownership is enforced in the query, not filtered after the fetch; no Firestore type leaks past the port; a demo project and a real project behave identically.
 **Tests.** The full conformance suite against a real database, opt-in via `MCPFORGE_TEST_FIRESTORE=1` and `MCPFORGE_TEST_FIRESTORE_PROJECT` so CI stays credential-free. AST-based tests assert no `google.cloud` import outside the adapter, no key material in it, and that ownership is filtered in the query.
 **Security.** Uses ADC (`03_SECURITY_ACCESS.md` §9). Ownership filtering happens server-side in the query so a mis-scoped read cannot return another user's document.
-**Status.** `DONE` — verified against the live `mcpforge-aa5c2` database: 33 tests pass, the same suite the in-memory adapter passes.
+**Status.** `IN_REVIEW` — verified against the live `mcpforge-aa5c2` database: 33 tests pass, the same suite the in-memory adapter passes.
 
 ---
 
@@ -404,6 +405,16 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Tests.** Elevation and revocation tests; a test enumerating all endpoints and asserting only this one mutates access mode.
 **Security.** `03_SECURITY_ACCESS.md` §5 enforcement.
 **Status.** `PENDING`
+
+### F6-05 — GitHub App webhook and installation callback
+**Purpose.** React to installation and repository-access changes instead of only discovering them on the next call.
+**Files.** `services/api/src/mcpforge/api/github_webhook.py`, `services/api/src/mcpforge/github/webhook.py`
+**Dependencies.** F3-01, F6-02
+**Implementation.** Callback route for the installation flow, plus a webhook endpoint verifying the `X-Hub-Signature-256` HMAC against `GITHUB_APP_WEBHOOK_SECRET` before parsing. Handles `installation`, `installation_repositories` and `repository` events by updating the bound project's access state.
+**Acceptance criteria.** An unsigned or wrongly-signed payload is rejected before parsing; a revoked installation marks affected projects unreachable rather than failing later at clone time; replayed deliveries are idempotent.
+**Tests.** Signature verification for valid, wrong-secret, missing and truncated signatures; a revocation test asserting the project becomes unreachable; a replay test.
+**Security.** An unauthenticated webhook is an unauthenticated write path into project state, so signature verification precedes parsing, not follows it.
+**Status.** `PENDING` — moved here from F3-01, which cannot be completed without a public URL.
 
 ### F6-04 — Rollback and failure handling
 **Purpose.** Leave a consistent, explained state when a write pipeline fails midway.

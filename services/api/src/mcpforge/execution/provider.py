@@ -51,6 +51,8 @@ class Workspace:
     id: str
     root: Path
     trust_level: TrustLevel
+    #: False for analysis and validation. Only cloning needs the network.
+    allow_network: bool = False
 
 
 @dataclass(frozen=True)

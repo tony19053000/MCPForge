@@ -10,7 +10,7 @@ spread across call sites is a boundary check that will be forgotten at one.
 
 from __future__ import annotations
 
-from mcpforge.models.core import AccessMode, Project
+from mcpforge.models.core import AccessMode, Project, utcnow
 
 
 class BoundaryError(Exception):
@@ -80,16 +80,32 @@ def bind_repository(
     )
 
 
-def elevate_to_write(project: Project) -> Project:
-    """Widen access. Only ever called from the explicit elevation endpoint."""
+def elevate_to_write(project: Project, *, actor_uid: str) -> Project:
+    """Widen access. Only ever called from the explicit elevation endpoint.
+
+    The actor is required, not optional: 03_SECURITY_ACCESS.md §5 asks for "a
+    persisted record of who elevated and when", and an elevation whose author is
+    unknown is not auditable.
+    """
     if project.repository_id is None:
         raise NoRepositoryBoundError(
             "A project with no bound repository cannot be elevated. This is what "
             "keeps a demo project permanently unable to open a pull request."
         )
-    return project.model_copy(update={"access_mode": AccessMode.WRITE_PR})
+    if not actor_uid:
+        raise AccessModeError("Elevation requires an authenticated user.")
+    if actor_uid != project.owner_uid:
+        raise AccessModeError("Only the project owner may widen repository access.")
+    return project.model_copy(
+        update={
+            "access_mode": AccessMode.WRITE_PR,
+            "elevated_by": actor_uid,
+            "elevated_at": utcnow(),
+        }
+    )
 
 
 def revoke_write(project: Project) -> Project:
-    """Elevation is reversible."""
+    """Elevation is reversible. The record of who elevated is kept, because an
+    audit trail that disappears when access is revoked is not an audit trail."""
     return project.model_copy(update={"access_mode": AccessMode.READ_ONLY})

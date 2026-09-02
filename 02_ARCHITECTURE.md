@@ -55,7 +55,8 @@ MCPForge/
 │       │   ├── adapter.ts      feature detection + real/mock adapter
 │       │   ├── register.ts     registration lifecycle
 │       │   └── tools/          one file per tool
-│       └── tests/              Vitest + RTL; e2e/ for Playwright
+│       ├── scripts/          manual live checks; never run in CI
+│       └── tests/            includes structure.py, AST helpers for structural rules              Vitest + RTL; e2e/ for Playwright
 ├── services/
 │   └── api/                    FastAPI backend (Python 3.12)
 │       ├── src/mcpforge/
@@ -73,8 +74,9 @@ MCPForge/
 │       │   ├── github/         GitHub App client, branch + PR writer
 │       │   ├── execution/      SecureExecutionProvider implementations
 │       │   ├── store/          persistence ports + adapters
-│       │   └── models/         Pydantic schemas (source of truth)
-│       └── tests/
+│       │   └── models/        Pydantic schemas (source of truth)
+│       ├── scripts/          manual live checks; never run in CI
+│       └── tests/            includes structure.py, AST helpers for structural rules
 ├── fixtures/
 │   └── demo-hotel-app/         real Next.js app used as the demo project and test fixture
 ├── docs/                       supplementary design notes
@@ -260,7 +262,9 @@ class SecureExecutionProvider(Protocol):
 ```
 
 Implementations:
-- `DevelopmentSecureExecutor` — ephemeral temp workspace, non-root subprocess, no network for analysis commands, CPU/memory/wall-clock limits, path jail. `attestation()` returns `None`. Trust level reported as `DEVELOPMENT_ISOLATION`.
+- `DevelopmentSecureExecutor` — ephemeral workspace destroyed by a context manager on success *and* failure; path jail resolving symlinks first; executable allowlist with argument arrays only; a minimal environment so a job cannot read our credentials; CPU, memory, file-size and wall-clock limits, the last enforced by killing the whole process group; and **real network denial** via an unprivileged user+network namespace. Where the kernel disallows unprivileged namespaces the executor **refuses to run** rather than proceeding without the isolation it claims — `network_isolation_available` reports which case applies. `attestation()` returns `None`. Trust level `DEVELOPMENT_ISOLATION`.
+
+  What it is *not*: an allowlisted `node` or `python3` can still read any file the running user can read. That is inherent to development isolation and is why the production target is Confidential Space.
 - `ConfidentialSpaceSecureExecutor` — Google Confidential Space target. Phase 8. Returns real attestation evidence or nothing.
 
 **Trust levels are an enum with exactly one meaning each:** `DEVELOPMENT_ISOLATION` and `HARDWARE_ATTESTED`. `HARDWARE_ATTESTED` is only ever set by code that has actually verified an attestation token. There is no path that sets it optimistically, and the UI renders the enum, not a boolean.
