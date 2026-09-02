@@ -175,14 +175,63 @@ def _suffix(path: str) -> str:
     return path.removeprefix("/api/agent").removeprefix("/sessions/{session_id}/")
 
 
-def agent_routes(client: TestClient) -> list[tuple[str, str]]:
-    """The agent surface, read from the router that defines it.
+def served_agent_routes(client: TestClient) -> set[tuple[str, str]]:
+    """Every (method, suffix) the **app** actually serves under `/api/agent`.
 
-    `client` is taken so a caller cannot forget the app is built; the routes
-    come from the module, which is what `include_router` mounts.
+    Read from each mounted router's effective route contexts, whose `.path` is
+    the served path — so a route reaches this set however it was mounted, and
+    `include_in_schema=False` cannot hide it the way it hid from `openapi()`.
+
+    This exists because rooting the enumeration at `agent_module.router` alone
+    traded away coverage the previous app-level walk had: a second router with
+    its own `/api/agent` prefix, included in `main.py`, served a self-approving
+    POST that the router walk could not see and 773 tests stayed green.
     """
-    assert client is not None
-    return routes_of(agent_module.router)
+    found: set[tuple[str, str]] = set()
+    for route in client.app.routes:  # type: ignore[attr-defined]
+        contexts = route.effective_candidates() if hasattr(route, "effective_candidates") else []
+        for context in contexts:
+            path = getattr(context, "path", "")
+            if not path.startswith("/api/agent"):
+                continue
+            methods = getattr(context, "methods", None)
+            if not methods:
+                raise UnexpectedRouteError(
+                    f"a route with no HTTP method is served at {path}. A WebSocket or "
+                    "Mount under /api/agent is an unswept path around every gate."
+                )
+            found.update(
+                (method.lower(), _suffix(path))
+                for method in methods
+                if method.upper() not in {"HEAD", "OPTIONS"}
+            )
+    return found
+
+
+def agent_routes(client: TestClient) -> list[tuple[str, str]]:
+    """The agent surface.
+
+    Two independent readings, required to agree:
+
+    - `routes_of(agent_module.router)` walks the router that defines the surface,
+      which is what catches a route added through a nested `include_router`
+      (its children are stored unprefixed, so a path filter misses them).
+    - `served_agent_routes(client)` reads what the app actually serves, which is
+      what catches a route reaching `/api/agent` from a different router.
+
+    Each reading has been wrong on its own, in different ways, one round apart.
+    Requiring both to agree is what makes a route hard to hide: it must be
+    absent from the defining router *and* absent from the served app.
+    """
+    declared = set(routes_of(agent_module.router))
+    served = served_agent_routes(client)
+
+    assert declared == served, (
+        "the agent surface disagrees with what the app serves.\n"
+        f"served but not on agent.router: {sorted(served - declared)}\n"
+        f"on agent.router but not served: {sorted(declared - served)}"
+    )
+    return sorted(declared)
 
 
 def test_the_route_enumeration_actually_finds_the_router(client: TestClient) -> None:

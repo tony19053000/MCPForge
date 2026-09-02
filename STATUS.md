@@ -10,7 +10,7 @@
 
 ## Current phase
 
-**Phase 7 — MCPForge Self-WebMCP (70% → 80%)** — implemented. **Rounds 1–5 all returned `FAIL`** (10, 4, 3, 3 and 2 findings). Round-5 fixes applied; round 6 in progress. The percentage stays at 70% until `[REVIEWER / TESTER]` returns `PASS`.
+**Phase 7 — MCPForge Self-WebMCP (70% → 80%)** — implemented. **Rounds 1–6 all returned `FAIL`** (10, 4, 3, 3, 2 and 1 findings). Round-6 fix applied; round 7 in progress. The percentage stays at 70% until `[REVIEWER / TESTER]` returns `PASS`.
 
 ## Current ticket
 
@@ -136,7 +136,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 A first attempt at this correction claimed the hash was invented. That was wrong: `git log --oneline --all | grep` does not find an orphaned commit, because `--all` walks refs and an amended-away commit is on none. `git log -1 <hash>` and `git cat-file -e <hash>` do find it. Verify a hash's *reachability*, not its existence. Every other hash below was re-checked with `git merge-base --is-ancestor` on 2026-09-03 and is reachable from `main`.
 
-Phase 7 work so far spans `f45f2e5`, `f1925ae` and `a034fce`, plus the round fixes `6b01d41`, `d82c56f`, `658d6ff`, `24028cf` and the round-5 fix. None of it is verified yet.
+Phase 7 work so far spans `f45f2e5`, `f1925ae` and `a034fce`, plus the round fixes `6b01d41`, `d82c56f`, `658d6ff`, `24028cf`, `5d92d9f` and the round-6 fix. None of it is verified yet.
 
 Phase 6 spans `4f18dcf`, `e06dd54` and `1346a88`. Phase 5 closed at `6d09ed7`, Phase 4 at `f8d1f9f`, Phase 3 at `e1976e1`, Phase 2 at `c7937cd`, Phase 1 at `7754003`, Phase 0 at `49e0162`. Every hash here is reachable from `main`.
 
