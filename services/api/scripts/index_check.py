@@ -42,7 +42,11 @@ async def main(full_name: str | None) -> int:
     print(f"repository : {target.full_name} (branch {target.default_branch})")
 
     executor = DevelopmentSecureExecutor()
-    workspace = await executor.create_workspace(WorkspaceSpec(run_id="index-check"))
+    # Cloning is the one networked step. Everything after it runs in a
+    # workspace that is denied the network.
+    workspace = await executor.create_workspace(
+        WorkspaceSpec(run_id="index-check", allow_network=True)
+    )
     print(f"workspace  : {workspace.root}")
     print(f"trust      : {workspace.trust_level.value}")
 

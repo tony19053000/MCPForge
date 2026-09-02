@@ -55,8 +55,7 @@ MCPForge/
 │       │   ├── adapter.ts      feature detection + real/mock adapter
 │       │   ├── register.ts     registration lifecycle
 │       │   └── tools/          one file per tool
-│       ├── scripts/          manual live checks; never run in CI
-│       └── tests/            includes structure.py, AST helpers for structural rules              Vitest + RTL; e2e/ for Playwright
+│       └── tests/           Vitest + RTL; e2e/ for Playwright
 ├── services/
 │   └── api/                    FastAPI backend (Python 3.12)
 │       ├── src/mcpforge/
@@ -75,8 +74,8 @@ MCPForge/
 │       │   ├── execution/      SecureExecutionProvider implementations
 │       │   ├── store/          persistence ports + adapters
 │       │   └── models/        Pydantic schemas (source of truth)
-│       ├── scripts/          manual live checks; never run in CI
-│       └── tests/            includes structure.py, AST helpers for structural rules
+│       ├── scripts/         manual live checks; never run in CI
+│       └── tests/           pytest, plus structure.py for AST-based structural rules
 ├── fixtures/
 │   └── demo-hotel-app/         real Next.js app used as the demo project and test fixture
 ├── docs/                       supplementary design notes

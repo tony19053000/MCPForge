@@ -83,7 +83,7 @@ SECRET_PATH_PATTERNS: tuple[str, ...] = (
 
 #: Any path containing one of these segments is quarantined.
 SECRET_DIR_SEGMENTS: frozenset[str] = frozenset(
-    {"secrets", "credentials", ".aws", ".ssh", ".gnupg"}
+    {"secrets", "credentials", ".aws", ".ssh", ".gnupg", ".gcloud", ".azure", ".kube"}
 )
 
 #: Extensions we never parse. Binary, media, archives, fonts.
@@ -148,8 +148,8 @@ LOCKFILES: frozenset[str] = frozenset(
         "bun.lockb",
         "poetry.lock",
         "uv.lock",
-        "Cargo.lock",
-        "Gemfile.lock",
+        "cargo.lock",
+        "gemfile.lock",
         "composer.lock",
     }
 )

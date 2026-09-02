@@ -29,6 +29,27 @@ jobs:
       - run: npm run lint --workspace=apps/web
       - run: npm run test --workspace=apps/web
       - run: npm run build --workspace=apps/web
+      - name: Client bundle carries no server credential
+        # Must run in the SAME job as the web build. It was once moved into a
+        # job that never builds apps/web, where it exited 0 having scanned
+        # nothing and reported green — a false trust claim.
+        run: |
+          BUNDLE=apps/web/.next
+          if [ ! -d "$BUNDLE" ]; then
+            echo "::error::$BUNDLE does not exist — this scan must run after the web build"
+            exit 1
+          fi
+          fail=0
+          for pattern in 'AQ\.[A-Za-z0-9_-]\{20,\}' 'GEMINI_API_KEY' 'generativelanguage' '@google/genai' 'BEGIN [A-Z ]*PRIVATE KEY' 'service_account'; do
+            if grep -rIl "$pattern" "$BUNDLE" 2>/dev/null | head -1 | grep -q .; then
+              echo "::error::Found '$pattern' in the client bundle"
+              fail=1
+            fi
+          done
+          if [ "$fail" = "1" ]; then exit 1; fi
+          echo "Scanned $(find "$BUNDLE" -type f | wc -l) files: no server credential or model SDK."
+          echo "The Firebase Web config IS inlined here, and that is correct:"
+          echo "it is a public browser identifier, not a secret."
 
   fixture:
     name: Demo fixture (typecheck · build)
@@ -44,24 +65,6 @@ jobs:
       # If it stops building, those phases are testing against a broken app.
       - run: npm run typecheck --workspace=fixtures/demo-hotel-app
       - run: npm run build --workspace=fixtures/demo-hotel-app
-      - name: Client bundle carries no server credential
-        # The Firebase Web config is public by design and is expected here.
-        # The Gemini key, a model SDK, or any private-key material is not.
-        run: |
-          BUNDLE=apps/web/.next
-          fail=0
-          for pattern in 'AQ\.[A-Za-z0-9_-]\{20,\}' 'GEMINI_API_KEY' 'generativelanguage' '@google/genai' 'BEGIN [A-Z ]*PRIVATE KEY' 'service_account'; do
-            if grep -rIl "$pattern" "$BUNDLE" 2>/dev/null | head -1 | grep -q .; then
-              echo "::error::Found '$pattern' in the client bundle"
-              fail=1
-            fi
-          done
-          if [ "$fail" = "1" ]; then exit 1; fi
-          echo "Client bundle contains no server credential or model SDK."
-          echo "The Firebase Web config IS inlined here, and that is correct:"
-          echo "it is a public browser identifier, not a secret."
-          echo "The Gemini key is 'AQ.'-prefixed and is scanned for above."
-
   api:
     name: API (ruff · mypy · pytest)
     runs-on: ubuntu-latest

@@ -206,9 +206,10 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 
 ### F3-02 — Repository and branch selection, boundary binding
 **Purpose.** Bind a project to exactly one repository and make every later operation prove it.
-**Files.** `services/api/src/mcpforge/api/repos.py`, `apps/web/src/components/repo/**`
+**Files.** `services/api/src/mcpforge/api/repos.py`, `services/api/src/mcpforge/github/boundary.py`
 **Dependencies.** F3-01
-**Implementation.** Selector UI; project binds one repository id and base branch; a shared assertion helper that every repository operation calls.
+**Implementation.** Project binds one repository id and base branch through `POST /api/projects/{id}/repository`; a shared assertion helper that every repository operation calls; elevation and revocation routes that record the actor.
+**Scope note.** The repository **selector UI** moved to `F7-05` during the Phase 3 review. The API and the boundary are the security-relevant half and are complete and tested; the UI belongs with the workspace panels that consume it, and building it now would mean guessing at that layout. Recorded rather than dropped.
 **Acceptance criteria.** Operating on an unbound or mismatched repository is a hard error; access mode starts `READ_ONLY`; rebinding requires an explicit, recorded action.
 **Tests.** Boundary-assertion unit tests; test that no code path rebinds silently; test that a new project defaults to `READ_ONLY`.
 **Security.** T3 and T9 controls.
@@ -459,6 +460,16 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Tests.** E2E: agent invokes → run pauses → human approves in the UI → execution continues. E2E: agent attempts self-approval → rejected and recorded.
 **Security.** T10 control.
 **Status.** `PENDING`
+
+### F7-05 — Repository selector UI
+**Purpose.** Let a developer choose which of their installation-scoped repositories a project is bound to, from the workspace.
+**Files.** `apps/web/src/components/repo/**`, `apps/web/src/components/workspace/workspace-view.tsx`
+**Dependencies.** F3-02, F1-05
+**Implementation.** Context-panel view listing repositories from `GET /api/github/repositories`, a branch selector, and the bind action. Shows the access mode and, when elevated, who elevated it and when. Elevation is offered only with the reason shown, per `03_SECURITY_ACCESS.md` §5.
+**Acceptance criteria.** Only installation-scoped repositories are offered; a bound project shows its repository and cannot be silently repointed; access mode is visible at all times; a demo project shows that it has no repository and cannot be elevated.
+**Tests.** RTL tests for the list, the bound state, the read-only badge, the elevation flow including the reason text, and the demo-project case.
+**Security.** The UI never decides access. It calls the routes, and the boundary in `github/boundary.py` is what enforces the rules.
+**Status.** `PENDING` — moved here from F3-02.
 
 ### F7-04 — Agent-origin activity labelling
 **Purpose.** The developer must always be able to see what an agent did on their behalf.
