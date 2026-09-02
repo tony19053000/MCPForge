@@ -20,6 +20,10 @@ const GATE_MEANING: Record<ApprovalDto["gate"], string> = {
     "Approving opens a pull request on an mcpforge/* branch. Your default branch is untouched.",
   ACCESS_ELEVATION:
     "Approving lets MCPForge create a branch and a pull request on this repository.",
+  REPOSITORY_BINDING:
+    "Approving binds this project to that repository and branch. Access stays read-only.",
+  WORKFLOW_SELECTION:
+    "Approving accepts which of your workflows become WebMCP tools. No code is written yet.",
 };
 
 /**

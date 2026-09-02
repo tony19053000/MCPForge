@@ -20,7 +20,10 @@ export interface ModelContextTool {
 }
 
 export interface ModelContextLike {
-  registerTool(tool: ModelContextTool, options?: { signal?: AbortSignal }): Promise<void>;
+  registerTool(
+    tool: ModelContextTool,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }
 
 /** Which object the API was found on, or that it was not found at all. */
@@ -36,14 +39,21 @@ export interface WebMCPAdapter {
   readonly registered: readonly ModelContextTool[];
 }
 
-function probe(): { context: ModelContextLike; surface: "document" | "navigator" } | null {
+function probe(): {
+  context: ModelContextLike;
+  surface: "document" | "navigator";
+} | null {
   if (typeof document !== "undefined") {
-    const found = (document as unknown as { modelContext?: ModelContextLike }).modelContext;
-    if (typeof found?.registerTool === "function") return { context: found, surface: "document" };
+    const found = (document as unknown as { modelContext?: ModelContextLike })
+      .modelContext;
+    if (typeof found?.registerTool === "function")
+      return { context: found, surface: "document" };
   }
   if (typeof navigator !== "undefined") {
-    const found = (navigator as unknown as { modelContext?: ModelContextLike }).modelContext;
-    if (typeof found?.registerTool === "function") return { context: found, surface: "navigator" };
+    const found = (navigator as unknown as { modelContext?: ModelContextLike })
+      .modelContext;
+    if (typeof found?.registerTool === "function")
+      return { context: found, surface: "navigator" };
   }
   return null;
 }
@@ -58,7 +68,10 @@ function probe(): { context: ModelContextLike; surface: "document" | "navigator"
 export class MockModelContext implements ModelContextLike {
   readonly tools: ModelContextTool[] = [];
 
-  async registerTool(tool: ModelContextTool, options?: { signal?: AbortSignal }): Promise<void> {
+  async registerTool(
+    tool: ModelContextTool,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
     this.tools.push(tool);
     options?.signal?.addEventListener("abort", () => {
       const index = this.tools.indexOf(tool);
@@ -67,7 +80,10 @@ export class MockModelContext implements ModelContextLike {
   }
 
   /** Call a registered tool, as an agent would. */
-  async call(name: string, input: Record<string, unknown> = {}): Promise<unknown> {
+  async call(
+    name: string,
+    input: Record<string, unknown> = {},
+  ): Promise<unknown> {
     const tool = this.tools.find((t) => t.name === name);
     if (!tool) throw new Error(`No tool named ${name} is registered`);
     return tool.execute(input);

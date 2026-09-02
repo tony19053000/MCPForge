@@ -7,12 +7,17 @@
 
 import { env } from "@/lib/env";
 import type {
+  AccessDto,
+  AgentArtifactDto,
+  AgentStatusDto,
   ApprovalDto,
   ApprovalGate,
   ApprovalStatus,
+  AwaitingApprovalDto,
   ChatEvent,
   EventDto,
   ProjectDto,
+  RepositoryDto,
   SessionDto,
   TurnDto,
 } from "@/lib/api/types";
@@ -95,6 +100,113 @@ export class ApiClient {
   ): Promise<{ open: boolean; reason: string }> {
     const query = new URLSearchParams({ gate, artifact_hash: artifactHash });
     return this.request(`/api/sessions/${sessionId}/gate?${query}`);
+  }
+
+  // -- the agent surface -------------------------------------------------
+  //
+  // These back the WebMCP tools in `src/webmcp/`. They are ordinary authorised
+  // calls: the server enforces ownership and stamps AGENT origin from the route,
+  // so nothing here needs to be trusted.
+
+  agentStatus(sessionId: string): Promise<AgentStatusDto> {
+    return this.request<AgentStatusDto>(`/api/agent/sessions/${sessionId}/status`);
+  }
+
+  agentWorkflows(sessionId: string): Promise<AgentArtifactDto> {
+    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/workflows`);
+  }
+
+  agentPlan(sessionId: string): Promise<AgentArtifactDto> {
+    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/plan`);
+  }
+
+  agentValidation(sessionId: string): Promise<AgentArtifactDto> {
+    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/validation`);
+  }
+
+  agentStartAnalysis(sessionId: string): Promise<{ session_id: string; started: boolean }> {
+    return this.request(`/api/agent/sessions/${sessionId}/analysis`, { method: "POST" });
+  }
+
+  agentConnectRepository(
+    sessionId: string,
+    repositoryFullName: string,
+    branch: string,
+  ): Promise<AwaitingApprovalDto> {
+    return this.request<AwaitingApprovalDto>(`/api/agent/sessions/${sessionId}/repository`, {
+      method: "POST",
+      body: JSON.stringify({ repository_full_name: repositoryFullName, branch }),
+    });
+  }
+
+  agentSelectWorkflows(sessionId: string, workflowIds: string[]): Promise<AwaitingApprovalDto> {
+    return this.request<AwaitingApprovalDto>(`/api/agent/sessions/${sessionId}/workflows`, {
+      method: "POST",
+      body: JSON.stringify({ workflow_ids: workflowIds }),
+    });
+  }
+
+  /** Requests the plan approval. It does not grant one — only a human can. */
+  agentRequestPlanApproval(sessionId: string): Promise<AwaitingApprovalDto> {
+    return this.request<AwaitingApprovalDto>(`/api/agent/sessions/${sessionId}/plan/approve`, {
+      method: "POST",
+    });
+  }
+
+  agentGeneratePatch(sessionId: string, summary: string): Promise<AwaitingApprovalDto> {
+    return this.request<AwaitingApprovalDto>(`/api/agent/sessions/${sessionId}/patch`, {
+      method: "POST",
+      body: JSON.stringify({ summary }),
+    });
+  }
+
+  agentSecurityReview(sessionId: string): Promise<AgentArtifactDto> {
+    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/security-review`, {
+      method: "POST",
+    });
+  }
+
+  agentRunValidation(sessionId: string): Promise<AgentArtifactDto> {
+    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/validation`, {
+      method: "POST",
+    });
+  }
+
+  agentCreatePullRequest(
+    sessionId: string,
+    title: string,
+    body = "",
+  ): Promise<AwaitingApprovalDto> {
+    return this.request<AwaitingApprovalDto>(`/api/agent/sessions/${sessionId}/pull-request`, {
+      method: "POST",
+      body: JSON.stringify({ title, body }),
+    });
+  }
+
+  // -- repositories and access (F7-05) -----------------------------------
+
+  listRepositories(): Promise<RepositoryDto[]> {
+    return this.request<RepositoryDto[]>("/api/github/repositories");
+  }
+
+  bindRepository(projectId: string, repositoryId: string, branch: string): Promise<AccessDto> {
+    return this.request<AccessDto>(`/api/projects/${projectId}/repository`, {
+      method: "POST",
+      body: JSON.stringify({ repository_id: repositoryId, branch }),
+    });
+  }
+
+  elevateAccess(projectId: string, reason: string): Promise<AccessDto> {
+    return this.request<AccessDto>(`/api/projects/${projectId}/access/elevate`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  revokeAccess(projectId: string): Promise<AccessDto> {
+    return this.request<AccessDto>(`/api/projects/${projectId}/access/revoke`, {
+      method: "POST",
+    });
   }
 
   /**

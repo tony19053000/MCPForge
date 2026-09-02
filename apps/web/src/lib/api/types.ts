@@ -35,7 +35,13 @@ export type RunState =
   | "COMPLETE";
 
 export type Origin = "HUMAN" | "AGENT" | "SYSTEM";
-export type ApprovalGate = "TOOL_PLAN" | "PATCH" | "PULL_REQUEST" | "ACCESS_ELEVATION";
+export type ApprovalGate =
+  | "TOOL_PLAN"
+  | "PATCH"
+  | "PULL_REQUEST"
+  | "ACCESS_ELEVATION"
+  | "REPOSITORY_BINDING"
+  | "WORKFLOW_SELECTION";
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export interface ProjectDto {
@@ -87,3 +93,51 @@ export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "error"; message: string; kind: string }
   | { type: "done"; sessionId: string };
+
+// -- the agent surface (`/api/agent`) --------------------------------------
+
+export interface AgentStatusDto {
+  project_id: string;
+  name: string;
+  state: RunState;
+  access_mode: "READ_ONLY" | "WRITE_PR";
+  repository_full_name: string | null;
+  is_demo: boolean;
+  session_id: string;
+}
+
+/** A stored artifact. `available: false` means the step has not run yet. */
+export interface AgentArtifactDto {
+  available: boolean;
+  kind: string;
+  artifact_hash: string | null;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * The only thing a mutation tool returns. There is deliberately no success
+ * variant: calling one asks a human to decide, it does not cause the action.
+ */
+export interface AwaitingApprovalDto {
+  status: "awaiting_human_approval";
+  approval_id: string;
+  gate: ApprovalGate;
+  artifact_hash: string;
+  message: string;
+}
+
+export interface RepositoryDto {
+  id: string;
+  full_name: string;
+  default_branch: string;
+  private: boolean;
+}
+
+export interface AccessDto {
+  project_id: string;
+  access_mode: "READ_ONLY" | "WRITE_PR";
+  repository_full_name: string | null;
+  elevated_by: string | null;
+  elevated_at: string | null;
+  reason: string | null;
+}
