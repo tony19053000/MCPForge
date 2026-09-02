@@ -13,9 +13,11 @@ import pathlib
 from collections.abc import Iterator
 
 import pytest
+from fastapi import APIRouter, WebSocket
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from mcpforge.api import agent as agent_module
 from mcpforge.auth.identity import AuthError, VerifiedIdentity
 from mcpforge.config import Settings
 from mcpforge.gemini.fake import FakeGeminiProvider
@@ -123,41 +125,64 @@ READ_TOOLS: list[str] = ["status", "workflows", "plan", "validation"]
 ALLOWED_METHODS = frozenset({"get", "post"})
 
 
-def agent_routes(client: TestClient) -> list[tuple[str, str]]:
-    """Every (method, path) actually mounted on the agent router.
+class UnexpectedRouteError(AssertionError):
+    """A leaf on the agent router that this file does not know how to classify."""
 
-    Read from `app.routes`, not from `app.openapi()`. FastAPI omits
-    `include_in_schema=False` routes from the OpenAPI document, so a route
-    hidden with one extra keyword argument was invisible to the very tests that
-    exist to prove nothing is hidden. `app.routes` is what is served.
+
+def routes_of(router: APIRouter) -> list[tuple[str, str]]:
+    """Every (method, path) in a router tree, including nested includes.
+
+    Walked from the router object, not from `app.routes` filtered by path
+    prefix. Two rounds were lost to that filter: FastAPI stores a nested
+    `include_router`'s children with their **unprefixed** path, so
+    `startswith("/api/agent")` discarded them and a POST added through one extra
+    `include_router` line was in no bucket while 55 tests stayed green.
+
+    Unknown leaf types raise rather than being skipped. An `APIWebSocketRoute`
+    has a path, no HTTP verb and no `.routes`, so a skip-what-you-do-not-
+    recognise walker dropped it silently — and a WebSocket endpoint that
+    approved its own gates passed every sweep in this file.
     """
     found: list[tuple[str, str]] = []
-
-    def walk(routes: object) -> None:
-        # This FastAPI version wraps `include_router` results rather than
-        # flattening them onto `app.routes`, so a non-recursive scan finds four
-        # docs routes and nothing else — and every sweep built on it passes
-        # vacuously. `test_the_route_enumeration_actually_finds_the_router`
-        # exists because that is exactly what happened here.
-        for route in routes:  # type: ignore[attr-defined]
-            if isinstance(route, APIRoute):
-                if route.path.startswith("/api/agent"):
-                    found.extend(
-                        (method.lower(), route.path)
-                        for method in route.methods or set()
-                        if method.upper() not in {"HEAD", "OPTIONS"}
-                    )
-            else:
-                # This FastAPI version wraps an included router in an
-                # `_IncludedRouter` that exposes neither `path` nor `routes`.
-                # The real APIRouter is behind `original_router`.
-                nested = getattr(route, "original_router", None) or route
-                child = getattr(nested, "routes", None)
-                if child is not None:
-                    walk(child)
-
-    walk(client.app.routes)  # type: ignore[attr-defined]
+    for route in router.routes:
+        nested = getattr(route, "original_router", None)
+        if nested is not None:
+            found.extend(routes_of(nested))
+            continue
+        if isinstance(route, APIRouter):
+            found.extend(routes_of(route))
+            continue
+        if not isinstance(route, APIRoute):
+            raise UnexpectedRouteError(
+                f"{type(route).__name__} at {getattr(route, 'path', '?')} is on the agent "
+                "router. Every agent-reachable route must be an APIRoute this file can "
+                "classify — a WebSocket or Mount is an unswept path around every gate."
+            )
+        found.extend(
+            (method.lower(), _suffix(route.path))
+            for method in route.methods or set()
+            if method.upper() not in {"HEAD", "OPTIONS"}
+        )
     return found
+
+
+def _suffix(path: str) -> str:
+    """The part that identifies the endpoint, however it was mounted.
+
+    Top-level routes carry the router's `/api/agent` prefix; children of a
+    nested include do not. Both normalise to the same key.
+    """
+    return path.removeprefix("/api/agent").removeprefix("/sessions/{session_id}/")
+
+
+def agent_routes(client: TestClient) -> list[tuple[str, str]]:
+    """The agent surface, read from the router that defines it.
+
+    `client` is taken so a caller cannot forget the app is built; the routes
+    come from the module, which is what `include_router` mounts.
+    """
+    assert client is not None
+    return routes_of(agent_module.router)
 
 
 def test_the_route_enumeration_actually_finds_the_router(client: TestClient) -> None:
@@ -169,8 +194,35 @@ def test_the_route_enumeration_actually_finds_the_router(client: TestClient) -> 
     """
     found = agent_routes(client)
     assert len(found) >= 12, f"agent_routes found only {len(found)} routes: {found}"
-    assert ("post", "/api/agent/sessions/{session_id}/pull-request") in found
-    assert ("get", "/api/agent/sessions/{session_id}/status") in found
+    assert ("post", "pull-request") in found
+    assert ("get", "status") in found
+
+
+def test_the_route_enumeration_sees_a_nested_include() -> None:
+    """A POST added through one extra `include_router` line was in no bucket
+    while the whole suite stayed green, because the child's stored path has no
+    `/api/agent` prefix to match on."""
+    outer, inner = APIRouter(prefix="/api/agent"), APIRouter()
+
+    @inner.post("/sessions/{session_id}/deploy")
+    async def deploy(session_id: str) -> dict[str, str]:
+        return {}
+
+    outer.include_router(inner)
+    assert ("post", "deploy") in routes_of(outer)
+
+
+def test_the_route_enumeration_refuses_a_route_it_cannot_classify() -> None:
+    """A WebSocket has a path, no HTTP verb and no `.routes`. Skipping it left
+    an agent-only path around every gate invisible to every sweep here."""
+    router = APIRouter(prefix="/api/agent")
+
+    @router.websocket("/sessions/{session_id}/stream")
+    async def stream(websocket: WebSocket, session_id: str) -> None:
+        await websocket.close()
+
+    with pytest.raises(UnexpectedRouteError, match="WebSocket"):
+        routes_of(router)
 
 
 def test_the_agent_router_speaks_only_get_and_post(client: TestClient) -> None:
