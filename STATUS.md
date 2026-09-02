@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**60%** — Phase 5 complete, verified by `[REVIEWER / TESTER]` on round 3.
+**70%** — Phase 6 complete, verified by `[REVIEWER / TESTER]` on round 3.
 
 ## Current phase
 
-**Phase 6 — Security, Patch and PR Pipeline (60% → 70%)** — implemented, in review.
+**Phase 7 — MCPForge Self-WebMCP (70% → 80%)** — not yet started.
 
 ## Current ticket
 
-`F6-01`..`F6-04` — `IN_REVIEW`. `F6-05` (webhook) stays `PENDING`: it needs a public URL.
+`F7-01` — WebMCP adapter — `PENDING`
 
 ---
 
@@ -56,19 +56,18 @@
 | F5-02 | WebMCP Generator | PASS (round 3) — output compiles in the real demo app |
 | F5-03 | Patch representation and diff | PASS (round 3) |
 | F5-04 | Framework adapter interface | PASS (round 3) |
+| F6-01 | Deterministic policy engine | PASS (round 3) |
+| F6-02 | Branch and PR writer | PASS (round 3) |
+| F6-03 | Access mode elevation flow | PASS (round 3) |
+| F6-04 | Rollback and failure handling | PASS (round 3) |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F6-01 | Deterministic policy engine | `IN_REVIEW` |
-| F6-02 | Branch and PR writer | `IN_REVIEW` |
-| F6-03 | Access mode elevation flow | `IN_REVIEW` — built in Phase 3, exercised here |
-| F6-04 | Rollback and failure handling | `IN_REVIEW` |
+None.
 
 ## Pending
 
-Phases 6–9, tickets `F6-01` through `F9-05`, including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
+Phases 7–9, tickets `F7-01` through `F9-05`, plus `F6-05` (GitHub webhook, needs a public URL), including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -131,9 +130,9 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`4f18dcf` — `feat(F6-01..F6-04): policy engine, PR writer, and failure handling`
+`41dad3c` — `docs: close Phase 6 at 70% after reviewer PASS`
 
-Phase 6 begins at `4f18dcf`. Phase 5 closed at `6d09ed7`, Phase 4 at `f8d1f9f`, Phase 3 at `e1976e1`, Phase 2 at `c7937cd`, Phase 1 at `7754003`, Phase 0 at `49e0162`. Every hash here is reachable from `main`.
+Phase 6 spans `4f18dcf`, `e06dd54` and `1346a88`. Phase 5 closed at `6d09ed7`, Phase 4 at `f8d1f9f`, Phase 3 at `e1976e1`, Phase 2 at `c7937cd`, Phase 1 at `7754003`, Phase 0 at `49e0162`. Every hash here is reachable from `main`.
 
 ---
 
@@ -566,3 +565,78 @@ returned. The absence of `approval_required` from `ProposedTool`.
 **Next intended task.** `F6-01` — the deterministic policy engine, then the
 branch-and-pull-request writer, which is the first code that can change someone
 else's repository.
+
+### 0009 — Phase 6: security, patch and pull-request pipeline
+
+**What was built.** The deterministic checks that decide whether a patch may be
+written, and the only code in MCPForge that can change a developer's repository.
+
+- `security/policy.py` — nine rules held as data.
+- `github/branches.py` — branch naming and the shapes we will write.
+- `github/writer.py` — a list of refusals with a little work at the end.
+- `github/pr_description.py` — the pull-request body, built not accepted.
+- `orchestration/recovery.py` — what to say and do when a write fails midway.
+
+**866 tests** — 152 web, 714 API. No real repository was touched at any point;
+the reviewer confirmed `mcpforge-test` still has one branch and zero pull
+requests.
+
+**Decisions worth keeping.**
+
+1. **The writer is a list of refusals.** Bound repository, `WRITE_PR` mode, both
+   approvals matching session and project and covering the patch by hash, the
+   base commit matching the one reviewed, the branch matching our shape in full,
+   and the policy engine passing again at write time. An approval says the human
+   agreed; it never says the rules do not apply.
+2. **Refs are created, never updated.** `create-ref` cannot move an existing
+   branch, so a protected branch is out of reach twice over. The single `DELETE`
+   is cleanup, reachable only behind `may_delete_branch`.
+3. **Cleanup needs two conditions.** The branch is in our namespace *and* this
+   run created it. A developer may have their own `mcpforge/` branch, and
+   matching a pattern is not permission to delete.
+4. **The pull-request body is built, not accepted.** From the plan and the
+   patch, and scanned before any GitHub contact, because it is outbound content
+   assembled from model-authored descriptions.
+5. **Redundant guards are kept deliberately.** Three mutations survived across
+   three rounds because a neighbouring check covers the same case. Each is one
+   comparison guarding the operation that changes someone else's repository, and
+   the combined property is test-pinned. Removing one to improve a mutation
+   score would be the wrong trade.
+
+**Review record — three rounds, 65 mutations.**
+
+Round 1, nine defects. Two were real: the approval did not bind the base commit,
+so the approved files could be committed onto a different base than the human
+reviewed; and the branch was only prefix-checked, while httpx collapses dot
+segments, so `mcpforge/../../../other` passed the check and retargeted the
+existence probe at an unrelated endpoint — which 404s, and reads as "the branch
+does not exist". F6-04 was also entirely dead code: written, tested against
+hand-supplied stages, and called from nowhere.
+
+Round 2, two defects. The failure handler caught only `GitHubError`, so an httpx
+timeout after the ref existed escaped raw — no outcome, no explanation, no
+cleanup, and a branch left behind. The client has a 60-second timeout, so that
+is an ordinary path, not an edge case.
+
+Round 3, PASS.
+
+**A process failure worth recording.** Round 2's other defect was mine: an edit
+loop matched two lines instead of one and overwrote the §6 paragraph stating
+where transition enforcement lives, while the commit message said the tree was
+"updated". That was the third time in this project an edit landed somewhere
+unintended and was reported as done. The remedy is not a better replace string;
+it is reading the file back afterwards, every time.
+
+**What NOT to change accidentally.** The refusal order in `assert_writable` —
+nothing is written before all of it passes, and a test asserts GitHub is not
+contacted on refusal. `BRANCH_SHAPE` being matched in full rather than by
+prefix. The `except (GitHubError, httpx.HTTPError)`. The two conditions in
+`may_delete_branch`. The AST route-enumeration test, which catches both
+`elevate_to_write` and a bare `model_copy` on `access_mode`.
+
+**Still open.** `F6-05`, the GitHub webhook, needs a publicly reachable URL and
+stays `PENDING`. The writer has no HTTP caller yet; it gets one with `F7-03`'s
+`create_pull_request` tool, which is where the ticket plan puts it.
+
+**Next intended task.** `F7-01` — the WebMCP adapter, and then MCPForge's own
+tools, which is what makes it agent-accessible.

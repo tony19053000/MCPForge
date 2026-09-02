@@ -388,7 +388,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Violations block regardless of the agent's verdict; each violation names file, line and rule id; the engine's result is what the gate reads.
 **Tests.** Positive and negative fixtures for every rule; test that an agent PASS alongside a policy violation still blocks.
 **Security.** `03_SECURITY_ACCESS.md` §8 enforcement; T5 control.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F6-02 — Branch and PR writer
 **Purpose.** The only component in the system that writes to a user's repository.
@@ -398,7 +398,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Writing to the default or any protected branch is impossible — asserted by test; there is no force-push code path; a repository-id mismatch is a hard error; a `READ_ONLY` project cannot reach the writer; a demo project cannot reach the writer.
 **Tests.** Attempt-to-write-default-branch test; missing-approval test; mismatched-repo test; `READ_ONLY` test; a static check that no `force` flag exists in the module.
 **Security.** T3 control. These tests are mandatory before any real credential is used against a real repository.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F6-03 — Access mode elevation flow
 **Purpose.** Make widening repository access a deliberate, auditable human act.
@@ -409,7 +409,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** No implicit elevation exists anywhere; elevation is reversible; the record is auditable; no endpoint other than this one can change access mode.
 **Tests.** Elevation and revocation tests; a test enumerating all endpoints and asserting only this one mutates access mode.
 **Security.** `03_SECURITY_ACCESS.md` §5 enforcement.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ### F6-05 — GitHub App webhook and installation callback
 **Purpose.** React to installation and repository-access changes instead of only discovering them on the next call.
@@ -429,7 +429,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Each failure point leaves a consistent state with an explanation; cleanup never deletes a branch MCPForge did not create.
 **Tests.** Injected-failure tests at each step; a test that a user-created branch matching the naming pattern is not deleted.
 **Security.** Prevents destructive cleanup from becoming a data-loss path.
-**Status.** `IN_REVIEW`
+**Status.** `DONE`
 
 ---
 
