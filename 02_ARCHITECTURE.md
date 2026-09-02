@@ -162,7 +162,7 @@ Six roles, one provider. Each agent = system instruction + input schema + strict
 |---|---|---|---|
 | 1 | Codebase Analyst | filtered repository index + selected snippets | `CodebaseAnalysis` (framework, summary, business operations, candidate workflows, unknowns) — each claim carrying evidence |
 | 2 | Workflow Architect | analysis + developer-selected workflows | `ToolPlan` (tools: name, description, JSON Schema input, output contract, risk class, approval requirement, mapping to existing function) |
-| 3 | WebMCP Generator | approved tool plan + relevant source | `GeneratedPatch` (file changes, per-file rationale, generated tests) |
+| 3 | WebMCP Generator | approved tool plan | `GeneratedPatch` (file changes, per-file rationale, generated tests) — **deterministic, no model call**; see below |
 | 4 | Security Reviewer | generated patch + tool plan + policy | `SecurityReport` (PASS/FAIL, findings with severity, recommended fixes) |
 | 5 | Validator / Test Agent | patch applied in secure workspace | `ValidationReport` (per-check results + evidence) |
 | 6 | Human Approval / Interaction | conversation + current run state | `InteractionTurn` (message, offered choices, requested approval id) |
@@ -176,6 +176,15 @@ already know exactly would add a way to be wrong for no gain, and every restated
 fact would then need verifying against the index anyway. The agent is asked only
 for the judgement the index cannot supply: which functions are business
 operations, which of them form a user-facing workflow, and how risky each is.
+
+**Agent 3 is not a model call.** The judgement was already spent: agent 2 decided
+which tools to build and which function each maps to, and a human approved that
+plan. What remains — emitting TypeScript from a validated contract — is
+mechanical, and a template cannot hallucinate an import, invent a function, or
+quietly reimplement business logic. It is also deterministic, so regenerating
+produces byte-identical output and does not invalidate an approval for no
+reason. It lives in `generation/`, not `agents/`, and every value a model wrote
+passes through `generation/escaping.py` before it becomes part of a file.
 
 Agent boundaries:
 - Agents 1, 2, 4, 6 never touch the filesystem.

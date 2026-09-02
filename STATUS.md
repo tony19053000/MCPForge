@@ -108,6 +108,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Model tool invocation | SDK automatic function calling explicitly disabled, asserted by test |
 | Model output as authorization | Impossible by construction. Gates load an `Approval` from the store by id, check it belongs to this session and project, and check its hash still matches. The interaction agent has no field in which to express an approval |
 | Risk classification | Re-derived from the mapped function by the policy engine itself, not read from the model's field. The stricter of the two verdicts wins |
+| Generated code | Every model-authored string passes through `generation/escaping.py` before becoming part of a file. Generated output is scanned for credentials before it is emitted. Generated tools validate declared types at runtime, not only presence |
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
 | Chain-of-thought | Never sent by the API and never rendered by the UI. Both tiers assert it independently |
 | Attestation | **Not implemented, not simulated.** An AST-based test asserts `HARDWARE_ATTESTED` appears nowhere in backend code except as an enum member |

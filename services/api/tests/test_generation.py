@@ -189,7 +189,8 @@ def test_an_object_taking_function_is_called_with_an_object() -> None:
     """`searchRooms(params: {...})` takes one argument, not two."""
     patch = generate_patch(WebMCPToolset(tools=[read_tool()]))
     source = next(f for f in patch.files if f.path.endswith("searchRooms.ts")).contents
-    assert "searchRoomsImpl({ guests: input.guests, maxPrice: input.maxPrice })" in source
+    # Validated locals, not raw property access: they are already narrowed.
+    assert "searchRoomsImpl({ guests, maxPrice })" in source
 
 
 def test_a_positional_function_is_called_positionally_in_its_own_order() -> None:
@@ -215,7 +216,7 @@ def test_a_positional_function_is_called_positionally_in_its_own_order() -> None
         for f in generate_patch(WebMCPToolset(tools=[tool])).files
         if f.path.endswith("checkAvailability.ts")
     ).contents
-    assert "checkAvailabilityImpl(input.roomId, input.checkIn, input.checkOut)" in source
+    assert "checkAvailabilityImpl(roomId, checkIn, checkOut)" in source
 
 
 def test_an_async_target_is_awaited() -> None:
@@ -434,3 +435,139 @@ def test_the_adapter_generates_the_same_patch_as_the_generator() -> None:
         adapter.generate(toolset, base_commit="abc").hashable()
         == generate_patch(toolset, base_commit="abc").hashable()
     )
+
+
+# -- secret scan of generated output — F5-02/F5-03 Security ----------------
+
+
+def test_a_patch_carrying_a_credential_is_refused() -> None:
+    """03_SECURITY_ACCESS.md §4.4 — generated content is scanned before it is
+    emitted. A model reading the developer's repository can carry a secret from
+    source into a tool description and out into a new file.
+    """
+    from mcpforge.generation.nextjs import GeneratedSecretError
+
+    leaked = "AKIA" + "IOSFODNN7EXAMPLE"
+    with pytest.raises(GeneratedSecretError) as exc:
+        generate_patch(WebMCPToolset(tools=[read_tool(description=f"Use {leaked} to call")]))
+
+    assert "searchRooms.ts" in exc.value.path
+    assert "aws access key id" in exc.value.rules
+
+
+def test_an_ordinary_patch_passes_the_scan() -> None:
+    generate_patch(WebMCPToolset(tools=[read_tool(), destructive_tool()]))
+
+
+# -- the generator has no capability to act — F5-02 Tests ------------------
+
+
+def test_the_generator_cannot_touch_the_filesystem_or_github() -> None:
+    """02_ARCHITECTURE.md §4 — Agent 3 emits a patch representation; it does not
+    write to any repository. Enforced by AST, as elsewhere in this project."""
+    from tests.structure import SRC, code_lines, files_importing
+
+    offenders = files_importing(
+        ("os", "pathlib", "subprocess", "shutil", "httpx", "mcpforge.github"),
+        under="mcpforge/generation",
+    )
+    assert not offenders, "the generator imports a capability it must not have:\n" + "\n".join(
+        offenders
+    )
+
+    banned = ("open(", "write_text", "Path(", "os.")
+    for path in (SRC / "mcpforge" / "generation").rglob("*.py"):
+        for lineno, code in code_lines(path):
+            for term in banned:
+                assert term not in code, f"{path.name}:{lineno}: {code}"
+
+
+# -- the abort-signal contract, pinned exactly -----------------------------
+
+
+def test_the_adapter_passes_the_abort_signal_to_register_tool() -> None:
+    """F5-02: registration uses registerTool with AbortSignal teardown.
+
+    Asserting the substring "signal" appears somewhere is satisfied by prose;
+    this pins the call form, because dropping the argument silently disables
+    teardown and still compiles.
+    """
+    adapter = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[read_tool()])).files
+        if f.path.endswith("adapter.ts")
+    ).contents
+    assert "registerTool(tool, { signal })" in adapter
+
+
+def test_every_registration_site_passes_the_controller_signal() -> None:
+    toolset = WebMCPToolset(tools=[read_tool(), destructive_tool()])
+    register = next(
+        f for f in generate_patch(toolset).files if f.path.endswith("register.ts")
+    ).contents
+    assert register.count("controller.signal") == len(toolset.tools)
+
+
+# -- generated input validation — 03_SECURITY_ACCESS.md §8.2 ---------------
+
+
+def test_a_generated_tool_checks_declared_types_not_only_presence() -> None:
+    """`{ guests: "drop" }` must be refused before it reaches the developer."""
+    source = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[read_tool()])).files
+        if f.path.endswith("searchRooms.ts")
+    ).contents
+    assert 'typeof guests !== "number" || !Number.isInteger(guests)' in source
+    assert 'return failed("guests must be an integer", "invalid_input")' in source
+
+
+def test_the_registration_site_does_not_cast_away_the_type() -> None:
+    """`input as never` defeated the only remaining line of defence."""
+    register = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[read_tool()])).files
+        if f.path.endswith("register.ts")
+    ).contents
+    assert "as never" not in register
+    assert "as unknown as" not in register
+
+
+# -- generated tests — F5-02 -----------------------------------------------
+
+
+def test_a_test_file_is_generated_for_every_tool() -> None:
+    toolset = WebMCPToolset(tools=[read_tool(), destructive_tool()])
+    patch = generate_patch(toolset)
+    for tool in toolset.tools:
+        assert f"{WEBMCP_DIR}/tools/{tool.handler_name}.test.ts" in patch.paths
+
+
+def test_a_generated_test_for_a_gated_tool_asserts_it_refuses_to_act() -> None:
+    """The developer inherits a test that fails loudly if the gate is removed."""
+    source = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[destructive_tool()])).files
+        if f.path.endswith("cancelReservation.test.ts")
+    ).contents
+    assert "refuses to act without approval" in source
+    assert 'expect("awaitingApproval" in result).toBe(true)' in source
+
+
+def test_a_generated_test_covers_input_validation() -> None:
+    source = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[read_tool()])).files
+        if f.path.endswith("searchRooms.test.ts")
+    ).contents
+    assert "rejects the wrong type for guests" in source
+    assert 'code: "invalid_input"' in source
+
+
+def test_generated_tests_are_escaped_like_everything_else() -> None:
+    source = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[read_tool(title='says "quoted"')])).files
+        if f.path.endswith("searchRooms.test.ts")
+    ).contents
+    assert 'describe("search_rooms"' in source

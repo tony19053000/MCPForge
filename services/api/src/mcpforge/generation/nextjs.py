@@ -19,8 +19,11 @@ Every handler calls the developer's own function. Nothing is reimplemented.
 
 from __future__ import annotations
 
+from mcpforge.generation.escaping import as_comment_text, as_json_literal, as_ts_string
+from mcpforge.generation.test_template import test_file
 from mcpforge.models.patch import ChangeKind, FileChange, GeneratedPatch
 from mcpforge.models.webmcp import CallStyle, WebMCPTool, WebMCPToolset
+from mcpforge.security.filters import scan_content
 
 WEBMCP_DIR = "src/webmcp"
 
@@ -156,18 +159,20 @@ export function createAdapter(): WebMCPAdapter {
 
 def _tool_file(tool: WebMCPTool) -> str:
     """One tool. Imports the developer's function and calls it."""
-    interface = tool.input_interface()
-    required = [p for p in tool.inputs if p.required]
+    interface = _input_interface(tool)
     alias = tool.import_alias
     call_args = _call_arguments(tool)
+
+    # Free text a model wrote. Never interpolated raw: a description ending
+    # `*/` would close the JSDoc block and everything after it would execute
+    # in the customer's application.
+    safe_name = as_ts_string(tool.name)
+    safe_title = as_ts_string(tool.title)
+    safe_description = as_ts_string(tool.description)
+    safe_comment_description = as_comment_text(tool.description)
     awaited = "await " if tool.source.is_async else ""
 
-    checks = "\n".join(
-        f"  if (input.{p.name} === undefined || input.{p.name} === null) {{\n"
-        f'    return failed("{p.name} is required", "invalid_input");\n'
-        f"  }}"
-        for p in required
-    )
+    checks = _input_validation(tool)
 
     if tool.approval_required:
         body = f'''  // {tool.risk.value}: this changes state, so it stops here.
@@ -175,11 +180,11 @@ def _tool_file(tool: WebMCPTool) -> str:
   // MCPForge requests approval and returns the pending id. The developer
   // approves in the application; an agent cannot approve on their behalf.
   const approvalId = await requestApproval({{
-    tool: "{tool.name}",
+    tool: {safe_name},
     risk: "{tool.risk.value}",
-    input: input as unknown as Record<string, unknown>,
+    input: raw,
   }});
-  return awaitingApproval(approvalId, "{tool.title}");'''
+  return awaitingApproval(approvalId, {safe_title});'''
     else:
         body = f"""  try {{
     const result = {awaited}{alias}({call_args});
@@ -203,24 +208,89 @@ export interface {tool.type_name}Input {{
 }}
 
 export const {tool.handler_name}Schema = {{
-  name: "{tool.name}",
-  title: "{tool.title}",
-  description: "{tool.description}",
+  name: {safe_name},
+  title: {safe_title},
+  description: {safe_description},
   inputSchema: {_schema_literal(tool)},
 }} as const;
 
 /**
- * {tool.description}
+ * {safe_comment_description}
  *
  * Risk: {tool.risk.value}{" — human approval required" if tool.approval_required else ""}
  * Calls: {tool.source.symbol}() from {tool.source.module}
  */
 export async function {tool.handler_name}(
-  input: {tool.type_name}Input,
+  raw: Record<string, unknown>,
 ): Promise<ToolResult<unknown>> {{
 {checks + chr(10) if checks else ""}{body}
 }}
 '''
+
+
+#: Runtime type guards per declared JSON type. 03_SECURITY_ACCESS.md §8.2
+#: requires input validated against the declared schema before executing, and a
+#: presence check alone lets `{ guests: "drop" }` reach the developer's code.
+_TYPE_GUARDS: dict[str, str] = {
+    "string": 'typeof {ref} !== "string"',
+    "number": 'typeof {ref} !== "number" || Number.isNaN({ref})',
+    "integer": 'typeof {ref} !== "number" || !Number.isInteger({ref})',
+    "boolean": 'typeof {ref} !== "boolean"',
+    "array": "!Array.isArray({ref})",
+    "object": '{ref} === null || typeof {ref} !== "object" || Array.isArray({ref})',
+}
+
+
+def _input_validation(tool: WebMCPTool) -> str:
+    """Presence and type checks generated from the tool's own schema.
+
+    Each field is pulled into a local and narrowed by a runtime guard, so the
+    call site needs no cast. An agent passing `{ guests: "drop" }` is refused
+    here rather than reaching the developer's function
+    (03_SECURITY_ACCESS.md §8.2).
+    """
+    lines: list[str] = []
+    for prop in tool.inputs:
+        article = "an" if prop.json_type[0] in "aeiou" else "a"
+        message = as_ts_string(f"{prop.name} must be {article} {prop.json_type}")
+        required_message = as_ts_string(f"{prop.name} is required")
+        guard = _TYPE_GUARDS[prop.json_type].format(ref=prop.name)
+
+        if prop.required:
+            lines.append(f"  const {prop.name} = raw.{prop.name};")
+        else:
+            # `?? undefined` so an explicit null from an agent is treated as
+            # "not supplied" rather than reaching an optional parameter typed
+            # `number | undefined`.
+            lines.append(f"  const {prop.name} = raw.{prop.name} ?? undefined;")
+
+        if prop.required:
+            lines.append(f"  if ({prop.name} === undefined || {prop.name} === null) {{")
+            lines.append(f'    return failed({required_message}, "invalid_input");')
+            lines.append("  }")
+            lines.append(f"  if ({guard}) {{")
+            lines.append(f'    return failed({message}, "invalid_input");')
+            lines.append("  }")
+        else:
+            lines.append(f"  if ({prop.name} !== undefined && ({guard})) {{")
+            lines.append(f'    return failed({message}, "invalid_input");')
+            lines.append("  }")
+    return "\n".join(lines)
+
+
+def _input_interface(tool: WebMCPTool) -> str:
+    """The TypeScript interface body for a tool's input.
+
+    Descriptions are model-authored, so each goes through `as_comment_text`: a
+    description ending `*/` would otherwise close the JSDoc and make the rest of
+    the line executable.
+    """
+    lines: list[str] = []
+    for prop in tool.inputs:
+        optional = "" if prop.required else "?"
+        lines.append(f"  /** {as_comment_text(prop.description)} */")
+        lines.append(f"  {prop.name}{optional}: {prop.ts_type};")
+    return "\n".join(lines)
 
 
 def _call_arguments(tool: WebMCPTool) -> str:
@@ -230,16 +300,14 @@ def _call_arguments(tool: WebMCPTool) -> str:
     so a reordered schema cannot silently swap two arguments of the same type.
     """
     names = tool.source.parameters or [p.name for p in tool.inputs]
+    # The validated locals, not the raw object: they are already narrowed.
     if tool.source.call_style is CallStyle.OBJECT:
-        fields = ", ".join(f"{name}: input.{name}" for name in names)
-        return "{ " + fields + " }"
-    return ", ".join(f"input.{name}" for name in names)
+        return "{ " + ", ".join(names) + " }"
+    return ", ".join(names)
 
 
 def _schema_literal(tool: WebMCPTool) -> str:
-    import json
-
-    return json.dumps(tool.input_schema(), indent=2).replace("\n", "\n  ")
+    return as_json_literal(tool.input_schema())
 
 
 def _register_file(toolset: WebMCPToolset) -> str:
@@ -252,7 +320,7 @@ def _register_file(toolset: WebMCPToolset) -> str:
         f"""    adapter.register(
       {{
         ...{t.handler_name}Schema,
-        execute: (input) => {t.handler_name}(input as never),
+        execute: (input) => {t.handler_name}(input),
       }},
       controller.signal,
     ),"""
@@ -335,8 +403,38 @@ export async function requestApproval(request: ApprovalRequest): Promise<string>
 )
 
 
+class GeneratedSecretError(Exception):
+    """Generated content carried something credential-shaped.
+
+    03_SECURITY_ACCESS.md §4.4 requires the generated patch be scanned before
+    review and again before a pull request. Descriptions and titles come from a
+    model reading the developer's repository, so a secret can travel from source
+    into a tool description and out into a new file.
+    """
+
+    def __init__(self, path: str, rules: list[str]) -> None:
+        super().__init__(
+            f"Generated file {path} contains credential-shaped content: {', '.join(rules)}. "
+            "Refusing to emit it."
+        )
+        self.path = path
+        self.rules = rules
+
+
+def scan_generated(patch: GeneratedPatch) -> None:
+    """Refuse a patch whose contents look like they carry a credential."""
+    for change in patch.files:
+        findings = scan_content(change.contents)
+        if findings:
+            raise GeneratedSecretError(change.path, sorted({f.rule for f in findings}))
+
+
 def generate_patch(toolset: WebMCPToolset, *, base_commit: str | None = None) -> GeneratedPatch:
-    """Emit the integration for a validated toolset."""
+    """Emit the integration for a validated toolset.
+
+    The result is scanned before it is returned, so a credential cannot reach a
+    diff view or a pull request through generated content.
+    """
     files: list[FileChange] = [
         FileChange(
             path=f"{WEBMCP_DIR}/types.ts",
@@ -380,6 +478,24 @@ def generate_patch(toolset: WebMCPToolset, *, base_commit: str | None = None) ->
             )
         )
 
+    for tool in toolset.tools:
+        files.append(
+            FileChange(
+                path=f"{WEBMCP_DIR}/tools/{tool.handler_name}.test.ts",
+                kind=ChangeKind.ADD,
+                contents=test_file(tool, GENERATED_HEADER),
+                rationale=(
+                    f"Test for {tool.title.lower()}: input validation, and "
+                    + (
+                        "that it refuses to act without approval."
+                        if tool.approval_required
+                        else "that a valid call succeeds."
+                    )
+                ),
+                affected_tool=tool.name,
+            )
+        )
+
     files.append(
         FileChange(
             path=f"{WEBMCP_DIR}/register.ts",
@@ -390,7 +506,7 @@ def generate_patch(toolset: WebMCPToolset, *, base_commit: str | None = None) ->
     )
 
     gated = len(toolset.requires_approval)
-    return GeneratedPatch(
+    patch = GeneratedPatch(
         files=files,
         base_commit=base_commit,
         summary=(
@@ -399,3 +515,5 @@ def generate_patch(toolset: WebMCPToolset, *, base_commit: str | None = None) ->
             "Every handler calls an existing function; no business logic is duplicated."
         ),
     )
+    scan_generated(patch)
+    return patch

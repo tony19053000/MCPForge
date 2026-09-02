@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mcpforge.api import approvals, chat, health, me, projects, repos
+from mcpforge.api import approvals, chat, generation, health, me, projects, repos
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
 from mcpforge.config import Settings, get_settings
@@ -94,6 +94,7 @@ def create_app(
     app.include_router(chat.router)
     app.include_router(approvals.router)
     app.include_router(repos.router)
+    app.include_router(generation.router)
     return app
 
 

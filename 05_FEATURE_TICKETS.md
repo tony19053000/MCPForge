@@ -346,7 +346,8 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 
 ### F5-02 — Agent 3: WebMCP Generator
 **Purpose.** Produce the actual integration code — the core capability of the product.
-**Files.** `services/api/src/mcpforge/agents/generator.py`, `services/api/src/mcpforge/generation/**`
+**Files.** `services/api/src/mcpforge/generation/**` (`nextjs.py`, `escaping.py`, `test_template.py`, `adapters/`)
+**Scope note.** There is no `agents/generator.py`: generation is deterministic rather than a model call. Agent 2 already decided which tools to build and what they map to, and a human approved it; emitting code from that validated contract is mechanical, and a template cannot hallucinate an import or reimplement logic. Recorded in `02_ARCHITECTURE.md` §4.
 **Dependencies.** F5-01, F3-06
 **Implementation.** Generates `src/webmcp/register.ts`, `src/webmcp/tools/*.ts` and `types.ts`, adapted to the target repository's conventions. Handlers call existing business logic. Emits generated tests per tool. Produces a patch representation only — the agent has no repository write capability.
 **Acceptance criteria.** Generated code imports and calls the mapped existing function rather than reimplementing it — asserted by an AST check over the generated output; registration goes through the adapter using `document.modelContext.registerTool` with `AbortSignal` teardown; a generated test exists for every tool; generated code typechecks in the target repository.

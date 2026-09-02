@@ -205,14 +205,9 @@ class WebMCPTool(BaseModel):
             "additionalProperties": False,
         }
 
-    def input_interface(self) -> str:
-        """The TypeScript interface body for this tool's input."""
-        lines = []
-        for prop in self.inputs:
-            optional = "" if prop.required else "?"
-            lines.append(f"  /** {prop.description} */")
-            lines.append(f"  {prop.name}{optional}: {prop.ts_type};")
-        return "\n".join(lines)
+    # Rendering lives in `generation/`, not here: every line of a generated file
+    # must pass through the escaping boundary, and a model has written these
+    # descriptions.
 
 
 class WebMCPToolset(BaseModel):

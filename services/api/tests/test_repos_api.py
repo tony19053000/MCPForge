@@ -227,3 +227,18 @@ def test_elevation_refuses_when_the_actor_is_not_the_owner(settings: Settings) -
             "elevation used the project's owner instead of the verified token subject"
         )
         assert "project owner" in response.text
+
+
+def test_the_supported_frameworks_endpoint_reports_the_registry(client: TestClient) -> None:
+    """01_PRD.md §9 — the product states support from the registry, never from
+    copy someone wrote once."""
+    from mcpforge.generation.adapters.registry import ADAPTERS
+
+    body = client.get("/api/frameworks").json()
+    assert [f["framework"] for f in body] == [a.info.framework for a in ADAPTERS]
+    assert [f["display_name"] for f in body] == [a.info.display_name for a in ADAPTERS]
+
+
+def test_the_frameworks_endpoint_is_public(client: TestClient) -> None:
+    """It says what the product can do; there is nothing private about it."""
+    assert client.get("/api/frameworks").status_code == 200

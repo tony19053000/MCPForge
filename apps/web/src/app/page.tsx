@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Logo } from "@/components/layout/logo";
 import { env } from "@/lib/env";
+import { SupportedFrameworks } from "@/components/supported-frameworks";
 
 /**
  * Landing page.
@@ -96,7 +97,8 @@ export default function Home() {
 
       <footer className="border-t border-border">
         <div className="mx-auto max-w-5xl px-6 py-8 text-sm text-subtle">
-          MCPForge · MIT licensed · Supports Next.js, React and TypeScript applications
+          MCPForge · MIT licensed ·{" "}
+          <SupportedFrameworks />
         </div>
       </footer>
     </div>
