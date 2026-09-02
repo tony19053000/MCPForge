@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**30%** — Phase 2 complete, verified by `[REVIEWER / TESTER]` on round 3.
+**40%** — Phase 3 complete, verified by `[REVIEWER / TESTER]` on round 3.
 
 ## Current phase
 
-**Phase 3 — GitHub + Safe Repository Ingestion (30% → 40%)** — implemented, in review.
+**Phase 4 — Six-Agent Orchestration (40% → 50%)** — not yet started.
 
 ## Current ticket
 
-`F3-01`..`F3-08` — `IN_REVIEW`
+`F4-01` — Agent framework and base contract — `PENDING`
 
 ---
 
@@ -39,23 +39,22 @@
 | F2-03 | Chat API with streaming | PASS (round 3) — verified live |
 | F2-04 | Workspace chat UI and activity timeline | PASS (round 3) |
 | F2-05 | Approval interaction UI | PASS (round 3) |
+| F3-01 | GitHub App integration | PASS (round 3) — verified live |
+| F3-02 | Repository binding and boundary | PASS (round 3) |
+| F3-03 | Secret and path filtering | PASS (round 3) |
+| F3-04 | Secure execution provider (development) | PASS (round 3) |
+| F3-05 | Repository indexer | PASS (round 3) |
+| F3-06 | Context retrieval | PASS (round 3) |
+| F3-07 | Demo project ingestion | PASS (round 3) |
+| F3-08 | Firestore store adapter | PASS (round 3) — verified live |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F3-01 | GitHub App integration | `IN_REVIEW` — verified live |
-| F3-02 | Repository selection and boundary binding | `IN_REVIEW` |
-| F3-03 | Secret and path filtering | `IN_REVIEW` |
-| F3-04 | Secure execution provider (development) | `IN_REVIEW` |
-| F3-05 | Repository indexer | `IN_REVIEW` |
-| F3-06 | Context retrieval | `IN_REVIEW` |
-| F3-07 | Demo project ingestion | `IN_REVIEW` |
-| F3-08 | Firestore store adapter | `IN_REVIEW` — verified against the live database |
+None.
 
 ## Pending
 
-Phases 3–9, tickets `F3-01` through `F9-05`, including `F3-08` (Firestore adapter, moved out of F2-02 during the Phase 2 review). See `05_FEATURE_TICKETS.md`.
+Phases 4–9, tickets `F4-01` through `F9-05`, including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -114,7 +113,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`6856628` — `fix: clear Phase 3 review findings`
+`b499b1e` — `docs: close Phase 3 at 40% after reviewer PASS`
 
 Phase 3 spans `20008e5` (F3-03/F3-04), `b93ab1a` (F3-01), `28da5ba` (F3-02/05/06/07), `d37fd5b` (F3-08) and `6856628` (review fixes). Earlier phases: Phase 2 `25555f7`..`c7937cd`, Phase 1 `f744be7`..`7754003`, Phase 0 `1430751`, `49e0162`.
 
@@ -325,3 +324,82 @@ credential scans.
 
 **Next intended task.** `F3-01` — GitHub App integration. Needs the owner to
 register a GitHub App (blocker B-03).
+
+### 0006 — Phase 3: GitHub and safe repository ingestion
+
+**What was built.** MCPForge can now reach a real repository, keep it inside a
+boundary, strip its secrets, run jobs against it in a sandbox, and turn it into
+a structure an agent can reason about — without ever handing a repository to a
+model wholesale.
+
+- `github/` — App client (installation-scoped, short-lived unpersisted tokens)
+  and `boundary.py`, the single assertion every repository operation calls.
+- `security/filters.py` + `pipeline.py` — path policy and content scanning, run
+  before anything is read or indexed.
+- `execution/` — `DevelopmentSecureExecutor`: path jail, executable allowlist,
+  minimal environment, real network denial, resource limits, guaranteed teardown.
+- `indexing/` — `sources.py` (two ingestion sources, one pipeline), `parser.py`
+  (tree-sitter), `indexer.py`, `retrieval.py`.
+- `store/firestore.py` — persistence, same conformance suite as in-memory.
+- `fixtures/demo-hotel-app` — a real Next.js hotel app, now built by CI.
+- `api/repos.py` — binding, elevation and revocation over HTTP.
+
+**509 tests** — 130 web, 379 API, plus 33 against the live Firestore database.
+Verified live end to end: GitHub → sandbox → clone → filter → index → destroy.
+
+**Decisions worth keeping.**
+
+1. **Filtering is case-folded.** `.ENV`, `ID_RSA` and `Server.PEM` are the same
+   files as their lowercase forms and are credentials either way.
+2. **A file with a secret is excluded, not scrubbed.** Redacting a match and
+   forwarding the rest is how a secret survives a filter.
+3. **Network denial is real, and honest where it is not available.** Where the
+   kernel disallows unprivileged namespaces the executor refuses to run rather
+   than proceeding without the isolation it advertises.
+4. **The wall clock kills the process group.** git, npm and next all fork;
+   killing only the direct child left grandchildren alive and blocked the read.
+   `_kill_group` compares against our own group first, because a child that
+   failed to `setsid()` would otherwise make us SIGKILL ourselves.
+5. **One boundary function.** A check spread across call sites is a check that
+   will be missed at one.
+6. **Two ingestion sources, one pipeline.** The demo project is a rehearsal of
+   the real path, not a separate track.
+
+**Review record — three rounds, and each found something real.**
+
+Round 1, twelve defects. Two were holes rather than gaps: secret paths were
+matched case-sensitively, so `.ENV`, `ID_RSA`, `Server.PEM`, `Secrets/` and
+`.SSH/` were opened, read and indexed; and the sandbox claimed "no network for
+analysis commands" in three places while enforcing it nowhere.
+
+Round 2, seven defects — **five of them regressions from my own round-1 fixes**,
+and two I had reported done without checking. The worst: adding a CI job for the
+fixture swallowed the client-bundle credential scan into a job that never builds
+the bundle, so it grepped a directory that did not exist, exited 0, and printed
+"no server credential". A green tick enforcing nothing, which is worse than no
+check. The case-fold fix also regressed `Cargo.lock`/`Gemfile.lock` into being
+read, and making network denial real broke the end-to-end script, which I had
+not re-run.
+
+Round 3, PASS.
+
+**Why `PermissiveStore` exists** (`tests/test_repos_api.py`). With a store that
+filters by owner, the token subject and the project owner are equal by
+construction, so replacing `actor_uid=identity.subject` with
+`actor_uid=project.owner_uid` is invisible through the normal path. A store whose
+ownership check is deliberately defeated is the only way to make the route prove
+it derives the actor from the verified token. Same technique as
+`ExplicitCloseStream` in the chat tests.
+
+**What NOT to change accidentally.** The case-folding in `classify_path` and the
+lowercase sets it depends on. The `os.getpgrp()` guard in `_kill_group`. The
+`allow_network=True` on the clone step only. `PermissiveStore` and
+`ExplicitCloseStream` — both are deliberately unusual and deleting them silently
+disables the property they protect. The bundle scan living in the `web` job.
+
+**Scope moved, not dropped.** `F6-05` (GitHub webhook — needs a public URL) and
+`F7-05` (repository selector UI — belongs with the panels that consume it), each
+with full fields and a scope note on the ticket it left.
+
+**Next intended task.** `F4-01` — the agent base contract, then the six runtime
+agents and the orchestrator that finally consults the transition table.
