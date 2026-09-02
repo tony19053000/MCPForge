@@ -79,8 +79,10 @@ def seed_plan(client: TestClient, session_id: str, uid: str = OWNER) -> None:
     )
 
 
-#: Every mutation tool, with a body that passes validation. Used by the sweeps
-#: below so a newly added tool cannot quietly skip the gate.
+#: Every gate-opening endpoint, with a body that passes validation. These lists
+#: are hand-maintained, so `test_every_agent_post_route_is_swept` enumerates the
+#: router and fails when a route appears in neither — otherwise a newly added
+#: endpoint would be swept by nothing while the sweeps read as exhaustive.
 MUTATION_TOOLS: list[tuple[str, dict[str, object]]] = [
     ("repository", {"repository_full_name": "acme/site", "branch": "main"}),
     ("workflows", {"workflow_ids": ["searchRooms"]}),
@@ -102,6 +104,27 @@ def seed_prerequisites(client: TestClient, session_id: str) -> None:
     """Whatever each gate-opening endpoint needs in order to reach its gate."""
     seed_plan(client, session_id)
     seed_patch(client, session_id)
+
+
+def test_every_agent_post_route_is_swept(client: TestClient) -> None:
+    """The sweeps only guarantee anything if they cover the whole router.
+
+    Reproducing the gap this closes: adding a POST endpoint to `api/agent.py`
+    that returns `started=True` and opens no gate left the entire suite green.
+    """
+    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+    posted = {
+        path.removeprefix("/api/agent/sessions/{session_id}/")
+        for path, methods in paths.items()
+        if path.startswith("/api/agent") and "post" in methods
+    }
+    swept = {path for path, _ in MUTATION_TOOLS} | {path for path, _ in STAGE_TOOLS}
+    missing = posted - swept
+    assert not missing, (
+        "agent POST routes covered by no sweep: "
+        + ", ".join(sorted(missing))
+        + ". Add each to MUTATION_TOOLS (it opens a gate) or STAGE_TOOLS (it does not)."
+    )
 
 
 # -- F7-02 read tools -------------------------------------------------------

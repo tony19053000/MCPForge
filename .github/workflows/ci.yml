@@ -54,8 +54,12 @@ jobs:
       - name: Production bundle cannot enable the WebMCP mock
         # CLAUDE.md §6.6 — a mock must never read as real capability. The guard
         # lives in lib/env.ts and is compile-time: NODE_ENV is inlined, so a
-        # production build must carry a hard false. A unit test on readPublicEnv
-        # would not catch a call site that passed useMock: true directly.
+        # production build must carry a hard false.
+        #
+        # Scope: this step checks the flag's compiled value only. A call site
+        # that ignored the flag and passed useMock: true directly would still
+        # leave webmcpMock:!1 here and pass. That case is covered by
+        # tests/webmcp-mount.test.ts, not by this step.
         run: |
           BUNDLE=apps/web/.next
           if [ ! -d "$BUNDLE" ]; then

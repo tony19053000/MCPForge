@@ -91,7 +91,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **866 passing** — 152 web (Vitest/RTL), 714 API (pytest). A further 15 run against live Firestore when opted in |
+| Unit | **988 passing** — 222 web (Vitest/RTL), 766 API (pytest), 1 skipped. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -132,7 +132,9 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 `d9497c4` — `docs: close Phase 6 at 70% after reviewer PASS`
 
-**Correction.** This line previously read `41dad3c`, which is not a commit in this repository — an invented hash, caught by the Phase 7 reviewer. Every hash below was re-checked against `git log` on 2026-09-03 and is reachable from `main`.
+**Correction.** This line previously read `41dad3c`. That is a real commit object — `docs: close Phase 6 at 70% after reviewer PASS` — but it was superseded when that commit was amended into `d9497c4`, leaving it unreachable from `main` (`git merge-base --is-ancestor 41dad3c main` fails). STATUS recorded the pre-amend hash.
+
+A first attempt at this correction claimed the hash was invented. That was wrong: `git log --oneline --all | grep` does not find an orphaned commit, because `--all` walks refs and an amended-away commit is on none. `git log -1 <hash>` and `git cat-file -e <hash>` do find it. Verify a hash's *reachability*, not its existence. Every other hash below was re-checked with `git merge-base --is-ancestor` on 2026-09-03 and is reachable from `main`.
 
 Phase 7 work so far spans `f45f2e5`, `f1925ae` and `a034fce`, plus the round-1 fix commit. None of it is verified yet.
 

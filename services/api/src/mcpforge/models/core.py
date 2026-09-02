@@ -166,15 +166,15 @@ class ArtifactKind(StrEnum):
     accepted from whoever is asking — which matters most on the agent surface.
     """
 
-    #: `PATCH`'s payload must be exactly `GeneratedPatch.hashable()`. That is
-    #: what makes the stored artifact's derived hash equal the value
-    #: `github/writer.py` requires both the PATCH and PULL_REQUEST approvals to
-    #: cover. An artifact stored under any other shape produces an approval that
-    #: reads as granted and authorises nothing.
     ANALYSIS = "ANALYSIS"
     REPOSITORY_BINDING = "REPOSITORY_BINDING"
     WORKFLOW_SELECTION = "WORKFLOW_SELECTION"
     TOOL_PLAN = "TOOL_PLAN"
+    #: This one carries a binding contract: its payload must be exactly
+    #: `GeneratedPatch.hashable()`. That is what makes the stored artifact's
+    #: derived hash equal the value `github/writer.py` requires both the PATCH
+    #: and PULL_REQUEST approvals to cover. An artifact stored under any other
+    #: shape produces an approval that reads as granted and authorises nothing.
     PATCH = "PATCH"
     SECURITY_REVIEW = "SECURITY_REVIEW"
     VALIDATION = "VALIDATION"

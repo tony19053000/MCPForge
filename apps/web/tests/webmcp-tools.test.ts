@@ -256,9 +256,14 @@ describe("tools do not advertise capability the code lacks", () => {
   });
 
   it("does not promise to run anything it does not run", () => {
+    // The previous version of this test checked two literal prefixes, so a
+    // description whose first sentence was exactly the false promise passed it.
+    // Present-tense capability verbs are what an agent reads as a commitment.
+    const PRESENT_TENSE = /\b(runs|starts|analyses|analyzes|executes|generates|returns pass)\b/i;
     for (const tool of createTools(clientWith(() => ({})), SESSION)) {
       if (NOT_WIRED.includes(tool.name)) {
-        expect(tool.description, tool.name).not.toMatch(/^Run the|^Start analysing/);
+        expect(tool.description, tool.name).not.toMatch(PRESENT_TENSE);
+        expect(tool.description, tool.name).toMatch(/^Request /);
       }
     }
   });
