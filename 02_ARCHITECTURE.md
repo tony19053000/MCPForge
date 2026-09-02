@@ -259,7 +259,9 @@ Rules:
 
 Because the approval carries the artifact hash, a regenerated patch invalidates a prior approval automatically.
 
-│       │   ├── orchestration/  machine.py (§6 enforcement), recovery.py (write failures)
+Enforcement lives in `orchestration/machine.py`. `RunMachine.transition` is the only way a session changes state: it checks the table, checks the gate where one applies, persists the transition with actor, origin and cause, and emits a `state.changed` event. `record_failure_loop` bounds regeneration and halts loudly on exhaustion.
+
+The write pipeline has its own failure handling in `orchestration/recovery.py`. `BranchAndPullRequestWriter.create_pull_request` records how far it got and returns a `WriteOutcome`, so a partial failure is explainable rather than a raw exception: nothing written, a commit no branch points at, or a named branch with no pull request. Cleanup removes a branch only when it is in the `mcpforge/` namespace *and* this run created it.
 
 ## 7. Activity events
 

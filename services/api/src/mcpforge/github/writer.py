@@ -310,7 +310,11 @@ class BranchAndPullRequestWriter:
                     "base": default_branch,
                 },
             )
-        except GitHubError as exc:
+        except (GitHubError, httpx.HTTPError) as exc:
+            # httpx.HTTPError as well as our own: a timeout or a dropped
+            # connection after the ref exists leaves exactly the state this
+            # handler is for, and the client is configured with a 60s timeout,
+            # so a slow POST /pulls is an ordinary production path.
             cleaned = False
             if stage is WriteStage.BRANCH_CREATED:
                 cleaned = await self._try_cleanup(repo, branch, created_by_this_run=branch_is_ours)

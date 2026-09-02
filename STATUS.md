@@ -92,7 +92,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **861 passing** — 152 web (Vitest/RTL), 709 API (pytest). A further 15 run against live Firestore when opted in |
+| Unit | **866 passing** — 152 web (Vitest/RTL), 714 API (pytest). A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |

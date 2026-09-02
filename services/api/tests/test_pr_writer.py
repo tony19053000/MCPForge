@@ -809,3 +809,107 @@ def test_a_patch_with_no_recorded_base_is_refused(project: Project, plan: ToolPl
             patch_approval=approval(ApprovalGate.PATCH, baseless),
             pr_approval=approval(ApprovalGate.PULL_REQUEST, baseless),
         )
+
+
+# -- transport failures, not only GitHub errors ----------------------------
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ConnectTimeout("timeout opening the PR"),
+        httpx.ReadTimeout("read timed out"),
+        httpx.ConnectError("connection refused"),
+        httpx.RemoteProtocolError("server disconnected"),
+    ],
+)
+async def test_a_transport_failure_after_the_branch_exists_is_handled(
+    project: Project,
+    patch: Any,
+    plan: ToolPlan,
+    token: InstallationToken,
+    failure: Exception,
+) -> None:
+    """A timeout is not a GitHubError.
+
+    Catching only our own exception type left a created branch with no pull
+    request, no explanation and no cleanup — the exact state F6-04 exists to
+    prevent, reached by the most ordinary failure there is.
+    """
+    deletes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "DELETE":
+            deletes.append(path)
+            return httpx.Response(204)
+        if "/git/ref/heads/" in path:
+            return httpx.Response(404, json={})
+        if path.endswith("/git/commits/basesha"):
+            return httpx.Response(200, json={"tree": {"sha": "t"}})
+        if path.endswith("/pulls"):
+            raise failure
+        return httpx.Response(201, json={"sha": "s", "ref": "r"})
+
+    writer = BranchAndPullRequestWriter(
+        token=token,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        base_url="https://api.github.test",
+    )
+    outcome = await writer.create_pull_request(
+        project=project,
+        repository_full_name=REPO,
+        default_branch="main",
+        base_commit="basesha",
+        branch=branch_name_for("booking"),
+        patch=patch,
+        plan=plan,
+        patch_approval=approval(ApprovalGate.PATCH, patch),
+        pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
+        session_id=SESSION,
+    )
+
+    assert outcome.succeeded is False
+    assert outcome.stage is WriteStage.BRANCH_CREATED
+    assert outcome.cleanup_performed is True
+    assert "mcpforge/webmcp-booking" in outcome.explain()
+    assert deletes == ["/repos/tony19053000/mcpforge-test/git/refs/heads/mcpforge/webmcp-booking"]
+
+
+async def test_a_transport_failure_before_the_branch_exists_deletes_nothing(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    deletes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "DELETE":
+            deletes.append(path)
+            return httpx.Response(204)
+        if "/git/ref/heads/" in path:
+            return httpx.Response(404, json={})
+        if path.endswith("/git/commits/basesha"):
+            raise httpx.ConnectTimeout("timeout reading the base commit")
+        return httpx.Response(201, json={"sha": "s"})
+
+    writer = BranchAndPullRequestWriter(
+        token=token,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        base_url="https://api.github.test",
+    )
+    outcome = await writer.create_pull_request(
+        project=project,
+        repository_full_name=REPO,
+        default_branch="main",
+        base_commit="basesha",
+        branch=branch_name_for("booking"),
+        patch=patch,
+        plan=plan,
+        patch_approval=approval(ApprovalGate.PATCH, patch),
+        pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
+        session_id=SESSION,
+    )
+
+    assert outcome.stage is WriteStage.NOTHING_DONE
+    assert "Nothing was written" in outcome.explain()
+    assert deletes == []
