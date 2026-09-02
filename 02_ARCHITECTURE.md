@@ -306,6 +306,30 @@ Implementations:
 
 Because the standard is young and moving, the adapter is the single place that knows the API shape. Spec drift is one file.
 
+### 10.1 The agent surface — `/api/agent`
+
+Every endpoint a WebMCP tool can reach lives under `/api/agent` (`services/api/src/mcpforge/api/agent.py`). The prefix is not a convenience: it is how `Origin.AGENT` is established. Origin is derived from the route the request arrived on, never from a body field, header or query parameter, so an agent cannot make its actions read as a human's.
+
+Three properties make the central claim true, and each is tested:
+
+1. **No decide route exists under `/api/agent`.** Deciding an approval lives in `api/approvals.py` and stamps `Origin.HUMAN` from a verified token.
+2. **Mutation endpoints stop at the gate.** They record an artifact, open an approval request, and return `awaiting_human_approval`. `api/agent.py` imports no transition function and no `RunState`.
+3. **Hashes are derived, not accepted.** The hash an approval binds to comes from stored artifact content.
+
+Both the human UI and the agent surface create approvals through one function, `open_gate_request` in `api/approvals.py`. A second approval-creation path is what would let an agent-only route around the gate open up without the human path changing.
+
+### 10.2 Artifacts
+
+`Artifact` (`models/core.py`) is one stored run artifact, at most one per session and kind, persisted through `Store.put_artifact` / `get_artifact`. Its `hash` is a property derived from `payload` — never stored, never supplied. Writing again under the same session and kind replaces the previous artifact, and that replacement is what invalidates an approval bound to the old hash.
+
+`ArtifactKind.PATCH` carries a binding contract: its payload must be exactly `GeneratedPatch.hashable()`. `github/writer.py` requires both the `PATCH` and `PULL_REQUEST` approvals to cover `artifact_hash(patch.hashable())`, so an artifact stored under any other shape produces an approval that reads as granted to the developer and authorises nothing.
+
+Two gates were added for the agent surface: `REPOSITORY_BINDING` and `WORKFLOW_SELECTION`. A human does both directly in the UI, where the click is the decision; an agent can only request them. Neither appears in `GATED_TRANSITIONS` — they gate an action, not a state entrance.
+
+### 10.3 What is not yet wired
+
+`start_repository_analysis`, `generate_patch`, `run_security_review` and `run_validation` record the request on the timeline and return `started: false`. The orchestrator does not yet act on them, and no stage persists an `ANALYSIS`, `TOOL_PLAN`, `SECURITY_REVIEW` or `VALIDATION` artifact, so the corresponding read tools report `available: false` against a real run. Returning `started: true` would be a hardcoded value that makes a check look passed. Wiring is tracked as **F9-01**.
+
 ## 11. Agent Readiness Score
 
 Computed by deterministic code from the Validator's executed checks. Gemini is never asked to produce a score.

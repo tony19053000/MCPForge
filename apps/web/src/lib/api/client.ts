@@ -19,6 +19,7 @@ import type {
   ProjectDto,
   RepositoryDto,
   SessionDto,
+  StageDto,
   TurnDto,
 } from "@/lib/api/types";
 
@@ -124,8 +125,8 @@ export class ApiClient {
     return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/validation`);
   }
 
-  agentStartAnalysis(sessionId: string): Promise<{ session_id: string; started: boolean }> {
-    return this.request(`/api/agent/sessions/${sessionId}/analysis`, { method: "POST" });
+  agentStartAnalysis(sessionId: string): Promise<StageDto> {
+    return this.request<StageDto>(`/api/agent/sessions/${sessionId}/analysis`, { method: "POST" });
   }
 
   agentConnectRepository(
@@ -153,21 +154,21 @@ export class ApiClient {
     });
   }
 
-  agentGeneratePatch(sessionId: string, summary: string): Promise<AwaitingApprovalDto> {
-    return this.request<AwaitingApprovalDto>(`/api/agent/sessions/${sessionId}/patch`, {
+  agentGeneratePatch(sessionId: string, summary: string): Promise<StageDto> {
+    return this.request<StageDto>(`/api/agent/sessions/${sessionId}/patch`, {
       method: "POST",
       body: JSON.stringify({ summary }),
     });
   }
 
-  agentSecurityReview(sessionId: string): Promise<AgentArtifactDto> {
-    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/security-review`, {
+  agentSecurityReview(sessionId: string): Promise<StageDto> {
+    return this.request<StageDto>(`/api/agent/sessions/${sessionId}/security-review`, {
       method: "POST",
     });
   }
 
-  agentRunValidation(sessionId: string): Promise<AgentArtifactDto> {
-    return this.request<AgentArtifactDto>(`/api/agent/sessions/${sessionId}/validation`, {
+  agentRunValidation(sessionId: string): Promise<StageDto> {
+    return this.request<StageDto>(`/api/agent/sessions/${sessionId}/validation`, {
       method: "POST",
     });
   }

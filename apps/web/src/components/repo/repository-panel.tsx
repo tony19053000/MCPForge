@@ -57,6 +57,8 @@ export function RepositoryPanel({
 
       {bound ? (
         <BoundRepository access={access} />
+      ) : project.is_demo ? (
+        <DemoProjectNotice />
       ) : (
         <RepositoryChooser
           project={project}
@@ -68,7 +70,7 @@ export function RepositoryPanel({
 
       <AccessControls
         project={project}
-        bound={bound}
+        bound={bound && !project.is_demo}
         elevated={elevated}
         access={access}
         onElevate={onElevate}
@@ -93,6 +95,23 @@ function BoundRepository({ access }: { access: AccessDto }) {
       <p className="mt-2 text-xs text-subtle">
         This project is bound to that repository. Binding cannot be changed from here — start a
         new project to analyse a different one.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * A demo project runs against MCPForge's own fixture, not a repository the
+ * developer owns. Offering it a repository chooser would imply it could be
+ * bound to one, and the boundary would refuse.
+ */
+function DemoProjectNotice() {
+  return (
+    <div className="rounded-card border border-border bg-surface-sunken p-3">
+      <p className="text-sm text-text">This is a demo project.</p>
+      <p className="mt-1 text-xs text-muted">
+        It has no repository, so nothing it produces can leave MCPForge. Create a new project to
+        analyse a repository you own.
       </p>
     </div>
   );

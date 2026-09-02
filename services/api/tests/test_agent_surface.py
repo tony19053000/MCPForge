@@ -19,7 +19,8 @@ from mcpforge.auth.identity import AuthError, VerifiedIdentity
 from mcpforge.config import Settings
 from mcpforge.gemini.fake import FakeGeminiProvider
 from mcpforge.main import create_app
-from mcpforge.models.core import Artifact, ArtifactKind
+from mcpforge.models.core import Artifact, ArtifactKind, artifact_hash
+from mcpforge.models.patch import ChangeKind, FileChange, GeneratedPatch
 from mcpforge.store.memory import InMemoryStore
 from tests.structure import SRC
 
@@ -83,7 +84,24 @@ def seed_plan(client: TestClient, session_id: str, uid: str = OWNER) -> None:
 MUTATION_TOOLS: list[tuple[str, dict[str, object]]] = [
     ("repository", {"repository_full_name": "acme/site", "branch": "main"}),
     ("workflows", {"workflow_ids": ["searchRooms"]}),
+    ("plan/approve", {}),
+    ("pull-request", {"title": "Add WebMCP tools"}),
 ]
+
+#: Endpoints that record a request but open no gate, because the stage they ask
+#: for is not wired to the orchestrator yet.
+STAGE_TOOLS: list[tuple[str, dict[str, object]]] = [
+    ("analysis", {}),
+    ("patch", {"summary": "generate"}),
+    ("security-review", {}),
+    ("validation", {}),
+]
+
+
+def seed_prerequisites(client: TestClient, session_id: str) -> None:
+    """Whatever each gate-opening endpoint needs in order to reach its gate."""
+    seed_plan(client, session_id)
+    seed_patch(client, session_id)
 
 
 # -- F7-02 read tools -------------------------------------------------------
@@ -101,6 +119,52 @@ def test_an_agent_cannot_read_another_users_session(client: TestClient) -> None:
     for path in ("status", "workflows", "plan", "validation"):
         response = client.get(f"/api/agent/sessions/{session_id}/{path}", headers=auth(OTHER))
         assert response.status_code == 404, path
+
+
+@pytest.mark.parametrize(("path", "payload"), MUTATION_TOOLS + STAGE_TOOLS)
+def test_another_user_cannot_post_to_any_agent_endpoint(
+    client: TestClient, path: str, payload: dict[str, object]
+) -> None:
+    """The reviewer's mutation showed only the READ path was covered: dropping
+    owner scoping left every mutation endpoint untested."""
+    session_id = make_session(client, OWNER)
+    seed_prerequisites(client, session_id)
+    response = client.post(
+        f"/api/agent/sessions/{session_id}/{path}", json=payload, headers=auth(OTHER)
+    )
+    assert response.status_code == 404, path
+
+
+@pytest.mark.parametrize(("path", "payload"), STAGE_TOOLS)
+def test_a_stage_that_is_not_wired_does_not_claim_to_have_started(
+    client: TestClient, path: str, payload: dict[str, object]
+) -> None:
+    """CLAUDE.md §9 — no hardcoded value that makes a check look passed."""
+    session_id = make_session(client)
+    seed_prerequisites(client, session_id)
+    body = client.post(
+        f"/api/agent/sessions/{session_id}/{path}", json=payload, headers=auth()
+    ).json()
+    assert body["started"] is False
+    assert "not yet connected" in body["detail"]
+
+
+@pytest.mark.parametrize(("path", "payload"), STAGE_TOOLS)
+def test_a_stage_that_is_not_wired_opens_no_gate(
+    client: TestClient, path: str, payload: dict[str, object]
+) -> None:
+    """An approval nothing can act on is worse than no approval: it reads as
+    granted to the developer and authorises nothing."""
+    session_id = make_session(client)
+    seed_prerequisites(client, session_id)
+    before = client.get(f"/api/sessions/{session_id}/events", headers=auth()).json()
+    opened_before = len([e for e in before if e["kind"] == "approval.requested"])
+
+    client.post(f"/api/agent/sessions/{session_id}/{path}", json=payload, headers=auth())
+
+    after = client.get(f"/api/sessions/{session_id}/events", headers=auth()).json()
+    opened_after = len([e for e in after if e["kind"] == "approval.requested"])
+    assert opened_after == opened_before, f"{path} opened a gate it cannot fulfil"
 
 
 def test_project_status_reports_the_real_state(client: TestClient) -> None:
@@ -128,6 +192,7 @@ def test_every_mutation_tool_stops_at_a_human_decision(
     client: TestClient, path: str, payload: dict[str, object]
 ) -> None:
     session_id = make_session(client)
+    seed_prerequisites(client, session_id)
     body = client.post(
         f"/api/agent/sessions/{session_id}/{path}", json=payload, headers=auth()
     ).json()
@@ -152,6 +217,7 @@ def test_a_mutation_tool_leaves_the_gate_shut(
     """The gate check is what the orchestrator consults. Calling the tool must
     not open it."""
     session_id = make_session(client)
+    seed_prerequisites(client, session_id)
     body = client.post(
         f"/api/agent/sessions/{session_id}/{path}", json=payload, headers=auth()
     ).json()
@@ -260,52 +326,81 @@ def test_a_pull_request_needs_a_patch_first(client: TestClient) -> None:
     assert response.status_code == 409
 
 
-def test_a_pull_request_request_does_not_rewrite_the_patch_artifact(
-    client: TestClient,
-) -> None:
-    """Requesting a PR must leave the patch artifact byte-identical.
+def seed_patch(client: TestClient, session_id: str, uid: str = OWNER) -> str:
+    """Store a PATCH artifact in the shape `github/writer.py` hashes.
 
-    Rewriting it would change the patch's derived hash, so the approval the
-    human just gave would stop covering the patch that gets written — silently,
-    at write time. Asserted on the stored artifact, not on the gate: the gate is
-    queried with a caller-supplied hash and would still answer "open" for the
-    old one.
+    The payload must be exactly what `GeneratedPatch.hashable()` returns, since
+    that is the value the writer requires both approvals to cover.
     """
+    store = client.app.state.store  # type: ignore[attr-defined]
+    session = asyncio.run(store.get_session(session_id, uid))
+    patch = GeneratedPatch(
+        base_commit="c" * 40,
+        summary="Register the searchRooms tool",
+        files=[
+            FileChange(
+                path="src/webmcp/tools.ts",
+                kind=ChangeKind.ADD,
+                contents="export {};\n",
+                rationale="Registers the generated tool.",
+            )
+        ],
+    )
+    artifact = asyncio.run(
+        store.put_artifact(
+            Artifact(
+                session_id=session_id,
+                project_id=session.project_id,
+                kind=ArtifactKind.PATCH,
+                payload=patch.hashable(),
+            )
+        )
+    )
+    assert artifact.hash == artifact_hash(patch.hashable())
+    return str(artifact.hash)
+
+
+def test_the_pr_approval_binds_to_the_hash_the_writer_requires(client: TestClient) -> None:
+    """`github/writer.py` refuses unless both approvals cover
+    `artifact_hash(patch.hashable())`. An approval bound to anything else reads
+    as granted to the developer and authorises nothing."""
     session_id = make_session(client)
-    seed_plan(client, session_id)
-    patch = client.post(
-        f"/api/agent/sessions/{session_id}/patch", json={"summary": "generate"}, headers=auth()
+    expected = seed_patch(client, session_id)
+
+    asked = client.post(
+        f"/api/agent/sessions/{session_id}/pull-request",
+        json={"title": "Add WebMCP tools"},
+        headers=auth(),
     ).json()
+
+    assert asked["artifact_hash"] == expected
+
     client.post(
-        f"/api/approvals/{patch['approval_id']}/decide",
+        f"/api/approvals/{asked['approval_id']}/decide",
         json={"decision": "APPROVED"},
         headers=auth(),
     )
+    store = client.app.state.store  # type: ignore[attr-defined]
+    approval = asyncio.run(store.get_approval(asked["approval_id"], OWNER))
+    assert approval.covers(expected), "the writer would refuse this approval"
 
-    def stored_patch_hash() -> str:
-        body = client.get(f"/api/agent/sessions/{session_id}/plan", headers=auth())
-        assert body.status_code == 200
-        store = client.app.state.store  # type: ignore[attr-defined]
-        artifact = asyncio.run(store.get_artifact(session_id, ArtifactKind.PATCH, OWNER))
-        assert artifact is not None
-        return str(artifact.hash)
 
-    before = stored_patch_hash()
-    assert before == patch["artifact_hash"]
+def test_requesting_a_pr_does_not_rewrite_the_patch_artifact(client: TestClient) -> None:
+    """Rewriting it would change the patch's derived hash, so the approval the
+    human just gave would stop covering the patch that gets written."""
+    session_id = make_session(client)
+    before = seed_patch(client, session_id)
 
     client.post(
         f"/api/agent/sessions/{session_id}/pull-request",
         json={"title": "Add WebMCP tools"},
         headers=auth(),
     )
-    assert stored_patch_hash() == before, "the PR request overwrote the approved patch"
 
-    gate = client.get(
-        f"/api/sessions/{session_id}/gate",
-        params={"gate": "PATCH", "artifact_hash": stored_patch_hash()},
-        headers=auth(),
-    ).json()
-    assert gate["open"] is True
+    store = client.app.state.store  # type: ignore[attr-defined]
+    after = asyncio.run(store.get_artifact(session_id, ArtifactKind.PATCH, OWNER))
+    assert after is not None
+    assert after.hash == before, "the PR request overwrote the approved patch"
 
 
 def test_regenerating_an_artifact_invalidates_its_approval(client: TestClient) -> None:

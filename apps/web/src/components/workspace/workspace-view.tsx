@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApprovalCard } from "@/components/approval/approval-card";
 import { RepositoryPanel } from "@/components/repo/repository-panel";
+import { ActivityTimeline } from "@/components/workspace/activity-timeline";
+import { WebMCPStatus } from "@/components/workspace/webmcp-status";
+import { useWebMCP } from "@/webmcp/use-webmcp";
 import { RegionErrorBoundary } from "@/components/error-boundary";
 import { ProviderButtons } from "@/components/auth/provider-buttons";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +18,7 @@ import { useAuth } from "@/lib/auth/context";
 import type {
   AccessDto,
   ApprovalDto,
+  EventDto,
   ProjectDto,
   RepositoryDto,
   SessionDto,
@@ -35,6 +39,11 @@ export function WorkspaceView() {
   const [repositories, setRepositories] = useState<readonly RepositoryDto[]>([]);
   const [access, setAccess] = useState<AccessDto | null>(null);
   const [reposLoading, setReposLoading] = useState(true);
+  const [events, setEvents] = useState<readonly EventDto[]>([]);
+
+  // Registers MCPForge's own WebMCP tools for this session, and tears them down
+  // on unmount. Without this the tools exist but nothing can reach them.
+  const webmcp = useWebMCP(api, chatSession?.id ?? null);
   const startedRef = useRef(false);
 
   // Opens the workspace once a session exists. No state is set synchronously
@@ -82,6 +91,41 @@ export function WorkspaceView() {
       cancelled = true;
     };
   }, [session, api]);
+
+  // The server timeline is the only place an agent's actions show up: an agent
+  // calls the API directly, so nothing about its work passes through this tab.
+  // Polling is how the developer sees it happen.
+  useEffect(() => {
+    const sessionId = chatSession?.id;
+    if (!sessionId) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const latest = await api.listEvents(sessionId);
+        if (cancelled) return;
+        setEvents(latest);
+
+        // An approval an agent opened arrives as an event, not as a response to
+        // anything this tab did. Find the newest one still awaiting a decision.
+        const requested = [...latest].reverse().find((e) => e.kind === "approval.requested");
+        const id = requested?.detail?.approval_id;
+        if (typeof id !== "string") return;
+        const found = await api.getApproval(id);
+        if (!cancelled && found.status === "PENDING") setApproval(found);
+      } catch {
+        // A failed poll is not worth interrupting the workspace for. The next
+        // one recovers, and the error surface stays reserved for real failures.
+      }
+    };
+
+    void poll();
+    const timer = setInterval(() => void poll(), 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [api, chatSession?.id]);
 
   if (!ready && !session) {
     return <CenteredNotice title="Loading" body="Checking your sign-in state." />;
@@ -148,6 +192,7 @@ export function WorkspaceView() {
         content: (
           <RegionErrorBoundary region="context panel">
             <div className="flex flex-col gap-6 p-4">
+              <WebMCPStatus state={webmcp} />
               {project && access ? (
                 <RepositoryPanel
                   project={project}
@@ -171,11 +216,15 @@ export function WorkspaceView() {
                   }}
                 />
               ) : (
-                <p className="text-sm text-subtle">
-                  Nothing needs your decision right now. Repository analysis and tool plans arrive
-                  in a later phase.
-                </p>
+                <p className="text-sm text-subtle">Nothing needs your decision right now.</p>
               )}
+
+              {events.length > 0 ? (
+                <div>
+                  <h2 className="mb-2 text-sm font-medium text-text">Activity</h2>
+                  <ActivityTimeline events={[...events]} />
+                </div>
+              ) : null}
             </div>
           </RegionErrorBoundary>
         ),

@@ -10,11 +10,11 @@
 
 ## Current phase
 
-**Phase 7 — MCPForge Self-WebMCP (70% → 80%)** — not yet started.
+**Phase 7 — MCPForge Self-WebMCP (70% → 80%)** — implemented, **round 1 returned `FAIL`**, fixes applied, awaiting round 2. The percentage stays at 70% until `[REVIEWER / TESTER]` returns `PASS`.
 
 ## Current ticket
 
-`F7-01` — WebMCP adapter — `PENDING`
+All five Phase 7 tickets are implemented and in review. F7-02 and F7-03 are `DONE, PARTIALLY BLOCKED` — see `05_FEATURE_TICKETS.md`; the blocked half is orchestrator wiring, moved into `F9-01`.
 
 ---
 
@@ -130,7 +130,11 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`41dad3c` — `docs: close Phase 6 at 70% after reviewer PASS`
+`d9497c4` — `docs: close Phase 6 at 70% after reviewer PASS`
+
+**Correction.** This line previously read `41dad3c`, which is not a commit in this repository — an invented hash, caught by the Phase 7 reviewer. Every hash below was re-checked against `git log` on 2026-09-03 and is reachable from `main`.
+
+Phase 7 work so far spans `f45f2e5`, `f1925ae` and `a034fce`, plus the round-1 fix commit. None of it is verified yet.
 
 Phase 6 spans `4f18dcf`, `e06dd54` and `1346a88`. Phase 5 closed at `6d09ed7`, Phase 4 at `f8d1f9f`, Phase 3 at `e1976e1`, Phase 2 at `c7937cd`, Phase 1 at `7754003`, Phase 0 at `49e0162`. Every hash here is reachable from `main`.
 

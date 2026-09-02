@@ -148,9 +148,29 @@ describe("elevation", () => {
 });
 
 describe("a demo project", () => {
-  it("shows it has no repository and cannot be elevated", () => {
-    render(panel({ project: { ...PROJECT, is_demo: true }, access: UNBOUND }));
-    expect(screen.getByText(/no repository, so it cannot be given write access/i)).toBeVisible();
+  const DEMO = { ...PROJECT, is_demo: true };
+
+  it("says it is a demo project", () => {
+    render(panel({ project: DEMO, access: UNBOUND }));
+    expect(screen.getByText(/this is a demo project/i)).toBeVisible();
+  });
+
+  it("is not offered a repository to connect", () => {
+    render(panel({ project: DEMO, access: UNBOUND }));
+    expect(screen.queryByLabelText("Repository to connect")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connect/i })).not.toBeInTheDocument();
+  });
+
+  it("cannot be elevated", () => {
+    render(panel({ project: DEMO, access: UNBOUND }));
     expect(screen.queryByRole("button", { name: /enable write access/i })).not.toBeInTheDocument();
+  });
+
+  it("is distinguished from a real project that is merely unbound", () => {
+    // The old test passed with is_demo flipped, because only the missing
+    // repository was ever asserted. A real unbound project gets the chooser.
+    render(panel({ project: { ...PROJECT, is_demo: false }, access: UNBOUND }));
+    expect(screen.queryByText(/this is a demo project/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Repository to connect")).toBeInTheDocument();
   });
 });

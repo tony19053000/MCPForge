@@ -117,8 +117,9 @@ export function readTools(
       name: "start_repository_analysis",
       title: "Start repository analysis",
       description:
-        "Start analysing the connected repository. Analysis only reads the " +
-        "repository and writes nothing to it.",
+        "Request analysis of the connected repository. Not yet connected to the " +
+        "orchestrator: the request is recorded and started is false. Analysis only " +
+        "reads the repository and writes nothing to it.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentStartAnalysis(sessionId)),
     },
@@ -206,7 +207,9 @@ export function mutationTools(
       name: "generate_patch",
       title: "Request patch generation",
       description:
-        "Request generation of the WebMCP code patch." + NEEDS_APPROVAL,
+        "Request generation of the WebMCP code patch. Authorised by the approved tool " +
+        "plan, so it opens no gate of its own. Not yet connected to the generator: the " +
+        "request is recorded and started is false.",
       inputSchema: {
         type: "object",
         properties: {
@@ -224,19 +227,21 @@ export function mutationTools(
     },
     {
       name: "run_security_review",
-      title: "Run the security review",
+      title: "Request a security review",
       description:
-        "Run the deterministic policy engine over the patch and return its findings. " +
-        "The verdict is advisory: it opens no gate.",
+        "Request a deterministic policy review of the patch. Not yet connected to the " +
+        "policy engine: the request is recorded and started is false. Any verdict is " +
+        "advisory and opens no gate.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentSecurityReview(sessionId)),
     },
     {
       name: "run_validation",
-      title: "Run validation",
+      title: "Request validation",
       description:
-        "Run the generated tests in the sandbox and return the report. Writes nothing " +
-        "to the repository.",
+        "Request that the generated tests run in the sandbox. Not yet connected to the " +
+        "executor: the request is recorded and started is false. Writes nothing to the " +
+        "repository.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentRunValidation(sessionId)),
     },

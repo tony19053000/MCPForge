@@ -443,7 +443,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** An unsupported browser degrades cleanly with an honest message; the mock cannot be enabled in a production build — asserted by test; the detected surface is reported to the Trust Panel.
 **Tests.** Unit tests for all three detection outcomes; production-build guard test; abort-teardown test.
 **Security.** T7-adjacent: a mock must never read as real browser support, in code or in UI.
-**Status.** `PENDING`
+**Status.** `DONE` — mounted by `webmcp/use-webmcp.ts`, surfaced by `components/workspace/webmcp-status.tsx`. CI asserts the adapter ships in the client bundle and that `webmcpMock` compiles to a hard false there.
 
 ### F7-02 — MCPForge read tools
 **Purpose.** Make MCPForge itself agent-accessible for non-mutating operations.
@@ -453,7 +453,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Tools register and are discoverable; schemas are valid; results are structured; an unauthenticated context returns a clean error rather than data.
 **Tests.** Playwright E2E driving each tool through the adapter; schema meta-validation; unauthenticated-context test.
 **Security.** These tools read only data the current user already owns — ownership is enforced server-side, not by the tool.
-**Status.** `PENDING`
+**Status.** `DONE, PARTIALLY BLOCKED`. The tools register and are discoverable, and ownership and the unauthenticated path are tested. The data-returning tools report `available: false` against a real run because no pipeline stage persists an artifact yet — see F9-01. Playwright is not installed: these are integration tests through `MockModelContext` and the FastAPI test client, **not E2E**. The two halves never meet in any executed test.
 
 ### F7-03 — MCPForge gated mutation tools
 **Purpose.** Prove the central claim: an agent can drive MCPForge, and still cannot approve anything.
@@ -463,7 +463,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** No mutation completes without a human decision recorded in the store — asserted by E2E; agent-supplied "approved" text has no effect; there is no agent-only code path around any gate.
 **Tests.** E2E: agent invokes → run pauses → human approves in the UI → execution continues. E2E: agent attempts self-approval → rejected and recorded.
 **Security.** T10 control.
-**Status.** `PENDING`
+**Status.** `DONE, PARTIALLY BLOCKED`. The gate holds: no path reaches `APPROVED` without a human decision, `approve_webmcp_plan` only opens a `PENDING` request, and both paths share `open_gate_request`. The acceptance criterion "human approves → **execution continues**" is **not met**: nothing consumes an approved `REPOSITORY_BINDING` or `WORKFLOW_SELECTION`, and generation is not wired, so an approval changes no state. Tracked as F9-01. `generate_patch` deliberately opens no gate — a PATCH approval must bind to `artifact_hash(patch.hashable())`, and binding one to a placeholder would give the developer something to approve that could never authorise the write. E2E is deferred to F9-01 (pipeline) and F9-03 (Playwright); the current tests are integration-level.
 
 ### F7-05 — Repository selector UI
 **Purpose.** Let a developer choose which of their installation-scoped repositories a project is bound to, from the workspace.
@@ -473,7 +473,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Only installation-scoped repositories are offered; a bound project shows its repository and cannot be silently repointed; access mode is visible at all times; a demo project shows that it has no repository and cannot be elevated.
 **Tests.** RTL tests for the list, the bound state, the read-only badge, the elevation flow including the reason text, and the demo-project case.
 **Security.** The UI never decides access. It calls the routes, and the boundary in `github/boundary.py` is what enforces the rules.
-**Status.** `PENDING` — moved here from F3-02.
+**Status.** `DONE` — moved here from F3-02.
 
 ### F7-04 — Agent-origin activity labelling
 **Purpose.** The developer must always be able to see what an agent did on their behalf.
@@ -483,7 +483,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Origin is visible and correct for every agent-initiated action; origin is set server-side, not supplied by the caller.
 **Tests.** E2E assertion on the timeline label; test that a client-supplied origin is ignored.
 **Security.** Prevents an agent from disguising its actions as human ones.
-**Status.** `PENDING`
+**Status.** `DONE`. Origin is derived from the route prefix, asserted by an AST test that no request body declares an `origin` field and that every `origin=` in `api/agent.py` comes from the module constant. The workspace polls `listEvents` and renders the timeline, so an agent-origin badge appears on real server data.
 
 ---
 
@@ -554,6 +554,13 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Both legs pass unattended in CI; every state transition is asserted in at least one leg; the PR leg produces a real pull request on a `mcpforge/*` branch of the test repository and never on its default branch; the demo leg reaches `VALIDATION_PASSED` and is refused by the PR writer.
 **Tests.** The E2E suite itself; a test that neither leg can complete with any approval skipped; a test that the demo leg's attempt to reach the PR writer is refused.
 **Security.** Confirms no gate can be bypassed in an integrated run — the composition of every earlier control.
+
+**Scope added during the Phase 7 review.** The orchestrator is not connected to the pipeline stages, which surfaced as four defects in Phase 7 rather than one here:
+- No stage persists an `ANALYSIS`, `TOOL_PLAN`, `SECURITY_REVIEW` or `VALIDATION` artifact, so F7-02's read tools can only report `available: false` against a real run. `api/agent.py` is currently the only caller of `put_artifact` in the backend.
+- `start_repository_analysis`, `generate_patch`, `run_security_review` and `run_validation` record their request and return `started: false`.
+- Nothing consumes an approved `REPOSITORY_BINDING` or `WORKFLOW_SELECTION` approval, so F7-03's "human approves → execution continues" cannot be met until this lands.
+- Each stage must persist its artifact at the point it produces it, and `ArtifactKind.PATCH`'s payload must be exactly `GeneratedPatch.hashable()` or the resulting approval authorises nothing.
+
 **Status.** `PENDING`
 
 ### F9-02 — Performance and reliability pass

@@ -84,6 +84,13 @@ describe("tool schemas", () => {
   });
 });
 
+/**
+ * These tests prove what the client sends and how it handles what comes back.
+ * They cannot prove the gate holds — the gate is server-side, and `fetch` is
+ * stubbed here. `services/api/tests/test_agent_surface.py` is what tests the
+ * gate against the real store; this file would pass unchanged if the server
+ * approved everything, and is not evidence that it does not.
+ */
 describe("mutation tools cannot approve", () => {
   const names = mutationTools(clientWith(() => ({})), SESSION).map((t) => t.name);
 
@@ -111,7 +118,9 @@ describe("mutation tools cannot approve", () => {
   });
 
   it("says in the description that it only requests a decision", () => {
-    const gated = ["connect_project", "select_workflows", "generate_patch", "create_pull_request"];
+    // generate_patch is authorised by the approved tool plan and opens no gate
+    // of its own, so it is not in this list.
+    const gated = ["connect_project", "select_workflows", "create_pull_request"];
     for (const tool of mutationTools(clientWith(() => ({})), SESSION)) {
       if (gated.includes(tool.name)) {
         expect(tool.description, tool.name).toMatch(/cannot approve|asks the developer/i);
@@ -232,5 +241,39 @@ describe("registration", () => {
       status: string;
     };
     expect(result.status).toBe("awaiting_human_approval");
+  });
+});
+
+describe("tools do not advertise capability the code lacks", () => {
+  const NOT_WIRED = ["start_repository_analysis", "generate_patch", "run_security_review", "run_validation"];
+
+  it("says so in the description of every stage that is not connected", () => {
+    for (const tool of createTools(clientWith(() => ({})), SESSION)) {
+      if (NOT_WIRED.includes(tool.name)) {
+        expect(tool.description, tool.name).toMatch(/not yet connected/i);
+      }
+    }
+  });
+
+  it("does not promise to run anything it does not run", () => {
+    for (const tool of createTools(clientWith(() => ({})), SESSION)) {
+      if (NOT_WIRED.includes(tool.name)) {
+        expect(tool.description, tool.name).not.toMatch(/^Run the|^Start analysing/);
+      }
+    }
+  });
+
+  it("passes the server's started: false through rather than reporting success", async () => {
+    const client = clientWith(() => ({
+      session_id: SESSION,
+      state: "PROJECT_CREATED",
+      started: false,
+      detail: "not yet connected to the orchestrator",
+    }));
+    for (const name of NOT_WIRED) {
+      const tool = createTools(client, SESSION).find((t) => t.name === name)!;
+      const result = (await tool.execute({})) as { started: boolean };
+      expect(result.started, name).toBe(false);
+    }
   });
 });

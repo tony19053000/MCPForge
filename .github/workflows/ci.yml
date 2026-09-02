@@ -51,6 +51,42 @@ jobs:
           echo "The Firebase Web config IS inlined here, and that is correct:"
           echo "it is a public browser identifier, not a secret."
 
+      - name: Production bundle cannot enable the WebMCP mock
+        # CLAUDE.md §6.6 — a mock must never read as real capability. The guard
+        # lives in lib/env.ts and is compile-time: NODE_ENV is inlined, so a
+        # production build must carry a hard false. A unit test on readPublicEnv
+        # would not catch a call site that passed useMock: true directly.
+        run: |
+          BUNDLE=apps/web/.next
+          if [ ! -d "$BUNDLE" ]; then
+            echo "::error::$BUNDLE does not exist — this scan must run after the web build"
+            exit 1
+          fi
+          if ! grep -rIoh 'webmcpMock:[^,}]*' "$BUNDLE/static" | sort -u | grep -q .; then
+            echo "::error::No webmcpMock value found in the client bundle — the WebMCP"
+            echo "::error::surface may not be shipping at all. It must be reachable."
+            exit 1
+          fi
+          bad=$(grep -rIoh 'webmcpMock:[^,}]*' "$BUNDLE/static" | sort -u | grep -v 'webmcpMock:!1' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::The production bundle can enable the WebMCP mock: $bad"
+            exit 1
+          fi
+          echo "webmcpMock is a hard false in the production bundle."
+
+      - name: The WebMCP surface actually ships
+        # The tools existing is not the same as the tools being reachable. This
+        # whole surface once passed every gate while shipping in no bundle.
+        run: |
+          BUNDLE=apps/web/.next
+          for symbol in modelContext get_project_status create_pull_request; do
+            if ! grep -rIl "$symbol" "$BUNDLE/static" >/dev/null 2>&1; then
+              echo "::error::'$symbol' is in no client chunk — the WebMCP tools are dead code"
+              exit 1
+            fi
+          done
+          echo "The WebMCP adapter and tools are present in the client bundle."
+
   fixture:
     name: Demo fixture (typecheck · build)
     runs-on: ubuntu-latest

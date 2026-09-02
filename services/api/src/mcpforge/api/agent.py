@@ -164,22 +164,41 @@ async def get_validation_report(
     return await _artifact_response(request, session, ArtifactKind.VALIDATION, identity)
 
 
-class AnalysisStartedResponse(BaseModel):
+class StageResponse(BaseModel):
+    """The result of asking for a pipeline stage.
+
+    `started` is false while the orchestrator is not wired to these endpoints.
+    Returning true would be a hardcoded value that makes a check look passed —
+    CLAUDE.md §9. The agent is told plainly instead, so it does not wait for a
+    result that will never arrive.
+    """
+
     session_id: str
     state: str
     started: bool
+    detail: str
 
 
-@router.post("/sessions/{session_id}/analysis", response_model=AnalysisStartedResponse)
+#: Said the same way by every stage that is recorded but not yet executed.
+NOT_WIRED = (
+    "The request was recorded on the timeline, but this stage is not yet "
+    "connected to the orchestrator, so nothing ran. Tracked as F9-01."
+)
+
+
+@router.post("/sessions/{session_id}/analysis", response_model=StageResponse)
 async def start_repository_analysis(
     session_id: str, identity: CurrentIdentity, request: Request
-) -> AnalysisStartedResponse:
+) -> StageResponse:
     """Analysis reads the repository and writes nothing to it, so it needs no
-    gate. It is still recorded as an agent action."""
+    gate. It is recorded as an agent action, and reports honestly that the
+    orchestrator does not yet act on the request."""
     session = await _session(request, session_id, identity)
     store = _store(request)
     await _record(store, session, "analysis.requested", "Agent requested repository analysis")
-    return AnalysisStartedResponse(session_id=session.id, state=session.state.value, started=True)
+    return StageResponse(
+        session_id=session.id, state=session.state.value, started=False, detail=NOT_WIRED
+    )
 
 
 # -- gated mutation tools (F7-03) -------------------------------------------
@@ -334,49 +353,66 @@ class GeneratePatchBody(BaseModel):
     summary: str = Field(default="Generate the WebMCP patch", max_length=500)
 
 
-@router.post("/sessions/{session_id}/patch", response_model=AwaitingApprovalResponse)
+@router.post("/sessions/{session_id}/patch", response_model=StageResponse)
 async def generate_patch(
     session_id: str, body: GeneratePatchBody, identity: CurrentIdentity, request: Request
-) -> AwaitingApprovalResponse:
+) -> StageResponse:
+    """Request patch generation.
+
+    Generation is authorised by the TOOL_PLAN approval, not by a gate of its
+    own, so this opens no approval. It deliberately does **not** create a PATCH
+    approval either: a PATCH approval must bind to `artifact_hash(patch.hashable())`
+    (`github/writer.py`), and no patch exists yet. Binding one to a placeholder
+    would give the developer something to approve that could never authorise the
+    write — an approval that reads as granted and is inert.
+    """
     session = await _session(request, session_id, identity)
     store = _store(request)
     plan = await store.get_artifact(session.id, ArtifactKind.TOOL_PLAN, identity.subject)
     if plan is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Generate a tool plan first")
-    return await _await_human(
-        request,
+    await _record(
+        store,
         session,
-        kind=ArtifactKind.PATCH,
-        gate=ApprovalGate.PATCH,
-        # Bound to the plan it came from: a regenerated plan changes this hash
-        # and invalidates any approval already given for the patch.
-        payload={"plan_hash": plan.hash, "summary": body.summary},
+        "generation.requested",
+        "Agent requested patch generation",
         summary=body.summary,
+    )
+    return StageResponse(
+        session_id=session.id, state=session.state.value, started=False, detail=NOT_WIRED
     )
 
 
-@router.post("/sessions/{session_id}/security-review", response_model=ArtifactResponse)
+@router.post("/sessions/{session_id}/security-review", response_model=StageResponse)
 async def run_security_review(
     session_id: str, identity: CurrentIdentity, request: Request
-) -> ArtifactResponse:
-    """Reads the patch and reports. It changes nothing, so it has no gate — but
-    its verdict is advisory and never opens one either."""
+) -> StageResponse:
+    """Request a security review.
+
+    The policy engine exists and is tested (`security/policy.py`), but nothing
+    here invokes it yet, so this reports that rather than returning an empty
+    report that would read as a clean review.
+    """
     session = await _session(request, session_id, identity)
     store = _store(request)
     await _record(store, session, "security_review.requested", "Agent requested a security review")
-    return await _artifact_response(request, session, ArtifactKind.SECURITY_REVIEW, identity)
+    return StageResponse(
+        session_id=session.id, state=session.state.value, started=False, detail=NOT_WIRED
+    )
 
 
-@router.post("/sessions/{session_id}/validation", response_model=ArtifactResponse)
+@router.post("/sessions/{session_id}/validation", response_model=StageResponse)
 async def run_validation(
     session_id: str, identity: CurrentIdentity, request: Request
-) -> ArtifactResponse:
-    """Runs the generated tests in the sandbox and reports. No gate: it writes
-    nothing to the customer's repository."""
+) -> StageResponse:
+    """Request validation. The sandbox executor exists; this does not yet call
+    it, and says so rather than returning an empty pass."""
     session = await _session(request, session_id, identity)
     store = _store(request)
     await _record(store, session, "validation.requested", "Agent requested validation")
-    return await _artifact_response(request, session, ArtifactKind.VALIDATION, identity)
+    return StageResponse(
+        session_id=session.id, state=session.state.value, started=False, detail=NOT_WIRED
+    )
 
 
 class CreatePullRequestBody(BaseModel):
@@ -399,13 +435,30 @@ async def create_pull_request(
     patch = await store.get_artifact(session.id, ArtifactKind.PATCH, identity.subject)
     if patch is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "There is no patch to open a PR for")
-    return await _await_human(
-        request,
+    # Bound to the patch's own hash, not to a new object wrapping it.
+    # `github/writer.py` requires the PATCH and PULL_REQUEST approvals to cover
+    # the same `artifact_hash(patch.hashable())`; an approval bound to anything
+    # else is inert, and the developer would have approved nothing.
+    approval = await open_gate_request(
+        store,
         session,
-        kind=ArtifactKind.PULL_REQUEST,
         gate=ApprovalGate.PULL_REQUEST,
-        # A separate artifact kind on purpose: writing this under PATCH would
-        # change the patch's hash and invalidate the patch approval already given.
-        payload={"patch_hash": patch.hash, "pr_title": body.title, "pr_body": body.body},
+        artifact_hash=patch.hash,
         summary=f"Open a pull request: {body.title}",
+    )
+    await _record(
+        store,
+        session,
+        "approval.requested",
+        "Agent requested your decision: PULL_REQUEST",
+        approval_id=approval.id,
+        pr_title=body.title,
+    )
+    return AwaitingApprovalResponse(
+        approval_id=approval.id,
+        gate=ApprovalGate.PULL_REQUEST,
+        artifact_hash=patch.hash,
+        message=(
+            "The pull request is waiting for your approval in MCPForge. An agent cannot approve it."
+        ),
     )

@@ -141,3 +141,15 @@ export interface AccessDto {
   elevated_by: string | null;
   elevated_at: string | null;
 }
+
+/**
+ * A pipeline stage the agent asked for. `started` is false while the stage is
+ * not connected to the orchestrator — reporting true would be a hardcoded value
+ * that makes a check look passed.
+ */
+export interface StageDto {
+  session_id: string;
+  state: RunState;
+  started: boolean;
+  detail: string;
+}
