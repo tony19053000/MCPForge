@@ -10,11 +10,11 @@
 
 ## Current phase
 
-**Phase 5 — WebMCP Transformation Engine (50% → 60%)** — not yet started.
+**Phase 5 — WebMCP Transformation Engine (50% → 60%)** — implemented, in review.
 
 ## Current ticket
 
-`F5-01` — WebMCP tool contract model — `PENDING`
+`F5-01`..`F5-04` — `IN_REVIEW`
 
 ---
 
@@ -55,7 +55,12 @@
 
 ## In progress
 
-None.
+| Ticket | Title | Status |
+|---|---|---|
+| F5-01 | WebMCP tool contract model | `IN_REVIEW` |
+| F5-02 | WebMCP Generator | `IN_REVIEW` — generated code typechecks inside the real demo app |
+| F5-03 | Patch representation and diff | `IN_REVIEW` |
+| F5-04 | Framework adapter interface | `IN_REVIEW` |
 
 ## Pending
 

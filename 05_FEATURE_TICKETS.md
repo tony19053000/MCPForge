@@ -342,7 +342,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Round-trips to valid registration code; invalid schemas are rejected before generation begins; tool names conform to a defined naming policy.
 **Tests.** Meta-schema validation; round-trip tests; naming-policy tests.
 **Security.** Rejects parameter shapes forbidden by §8.2 (raw identifiers, path parameters, query fragments) at model level, before generation.
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F5-02 — Agent 3: WebMCP Generator
 **Purpose.** Produce the actual integration code — the core capability of the product.
@@ -352,7 +352,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Generated code imports and calls the mapped existing function rather than reimplementing it — asserted by an AST check over the generated output; registration goes through the adapter using `document.modelContext.registerTool` with `AbortSignal` teardown; a generated test exists for every tool; generated code typechecks in the target repository.
 **Tests.** Golden-file tests against the demo fixture; AST assertion of logic reuse; typecheck of the patched fixture; test that the generator has no filesystem or GitHub capability.
 **Security.** Generator output is scanned for secrets before it leaves the ticket's boundary (§4.4).
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F5-03 — Patch representation and diff view
 **Purpose.** Make every generated change reviewable by a human before it exists anywhere else.
@@ -362,7 +362,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** The patch applies cleanly to the base commit; each file shows a plain-language rationale and its tool chip; a large diff renders without blocking the main thread.
 **Tests.** Patch-application test against the fixture; diff rendering and virtualization tests; rationale-presence test.
 **Security.** Patch is scanned for secrets before display and again before PR creation (§4.4).
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ### F5-04 — Framework adapter interface
 **Purpose.** Make future framework support possible without pretending it exists now.
@@ -372,7 +372,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** An unsupported framework produces a clear refusal naming the detected framework, never degraded output; the supported-framework list in the UI is generated from the registered adapters rather than hardcoded copy.
 **Tests.** Test with a Vue fixture → explicit unsupported result; test that the UI list matches the adapter registry.
 **Security.** Prevents the product from claiming capability it does not have (`01_PRD.md` §9).
-**Status.** `PENDING`
+**Status.** `IN_REVIEW`
 
 ---
 
