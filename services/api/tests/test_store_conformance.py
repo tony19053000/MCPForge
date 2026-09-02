@@ -293,6 +293,7 @@ def test_ownership_is_filtered_in_the_query_not_after_the_fetch() -> None:
         "list_projects must filter by owner in the Firestore query"
     )
 
+
 # -- artifacts -------------------------------------------------------------
 
 

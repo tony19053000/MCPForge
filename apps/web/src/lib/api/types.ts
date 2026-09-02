@@ -137,7 +137,7 @@ export interface AccessDto {
   project_id: string;
   access_mode: "READ_ONLY" | "WRITE_PR";
   repository_full_name: string | null;
+  base_branch: string | null;
   elevated_by: string | null;
   elevated_at: string | null;
-  reason: string | null;
 }

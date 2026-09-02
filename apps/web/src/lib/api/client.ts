@@ -189,17 +189,30 @@ export class ApiClient {
     return this.request<RepositoryDto[]>("/api/github/repositories");
   }
 
-  bindRepository(projectId: string, repositoryId: string, branch: string): Promise<AccessDto> {
+  bindRepository(
+    projectId: string,
+    repositoryId: string,
+    fullName: string,
+    baseBranch: string,
+  ): Promise<AccessDto> {
     return this.request<AccessDto>(`/api/projects/${projectId}/repository`, {
       method: "POST",
-      body: JSON.stringify({ repository_id: repositoryId, branch }),
+      body: JSON.stringify({
+        repository_id: repositoryId,
+        full_name: fullName,
+        base_branch: baseBranch,
+      }),
     });
   }
 
-  elevateAccess(projectId: string, reason: string): Promise<AccessDto> {
+  /**
+   * Widen a project to WRITE_PR. It takes no body: the reason is shown to the
+   * developer in the UI, and the decision is the click. Nothing the client
+   * sends influences whether elevation is permitted — the boundary decides.
+   */
+  elevateAccess(projectId: string): Promise<AccessDto> {
     return this.request<AccessDto>(`/api/projects/${projectId}/access/elevate`, {
       method: "POST",
-      body: JSON.stringify({ reason }),
     });
   }
 

@@ -480,6 +480,5 @@ def test_approval_creation_has_exactly_one_implementation() -> None:
             ):
                 offenders.append(f"{path.name}:{node.lineno}")
     assert offenders == ["approvals.py:" + offenders[0].split(":")[1]], (
-        "Approval is constructed in more than one place in the API layer: "
-        + ", ".join(offenders)
+        "Approval is constructed in more than one place in the API layer: " + ", ".join(offenders)
     )

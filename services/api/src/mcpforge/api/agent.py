@@ -79,9 +79,7 @@ async def _record(store: Store, session: Session, kind: str, label: str, **detai
     this file can be made to write a HUMAN-origin event.
     """
     await store.append_event(
-        RunEvent(
-            session_id=session.id, kind=kind, label=label, detail=detail, origin=ORIGIN
-        )
+        RunEvent(session_id=session.id, kind=kind, label=label, detail=detail, origin=ORIGIN)
     )
 
 
@@ -180,9 +178,7 @@ async def start_repository_analysis(
     gate. It is still recorded as an agent action."""
     session = await _session(request, session_id, identity)
     store = _store(request)
-    await _record(
-        store, session, "analysis.requested", "Agent requested repository analysis"
-    )
+    await _record(store, session, "analysis.requested", "Agent requested repository analysis")
     return AnalysisStartedResponse(session_id=session.id, state=session.state.value, started=True)
 
 

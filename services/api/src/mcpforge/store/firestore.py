@@ -198,8 +198,8 @@ class FirestoreStore:
         self, session_id: str, kind: ArtifactKind, owner_uid: str
     ) -> Artifact | None:
         await self._owned_session(session_id, owner_uid)
-        snapshot = await self._db.collection(ARTIFACTS).document(
-            self._artifact_id(session_id, kind)
-        ).get()
+        snapshot = (
+            await self._db.collection(ARTIFACTS).document(self._artifact_id(session_id, kind)).get()
+        )
         data = snapshot.to_dict() if snapshot.exists else None
         return Artifact.model_validate(data) if data is not None else None

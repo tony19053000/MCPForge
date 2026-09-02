@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApprovalCard } from "@/components/approval/approval-card";
+import { RepositoryPanel } from "@/components/repo/repository-panel";
 import { RegionErrorBoundary } from "@/components/error-boundary";
 import { ProviderButtons } from "@/components/auth/provider-buttons";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,13 @@ import { Card } from "@/components/ui/card";
 import { WorkspaceShell } from "@/components/layout/workspace-shell";
 import { Chat } from "@/components/workspace/chat";
 import { useAuth } from "@/lib/auth/context";
-import type { ApprovalDto, ProjectDto, SessionDto } from "@/lib/api/types";
+import type {
+  AccessDto,
+  ApprovalDto,
+  ProjectDto,
+  RepositoryDto,
+  SessionDto,
+} from "@/lib/api/types";
 
 /**
  * The workspace — 04_FRONTEND_SPEC.md §2.
@@ -25,6 +32,9 @@ export function WorkspaceView() {
   const [chatSession, setChatSession] = useState<SessionDto | null>(null);
   const [approval, setApproval] = useState<ApprovalDto | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [repositories, setRepositories] = useState<readonly RepositoryDto[]>([]);
+  const [access, setAccess] = useState<AccessDto | null>(null);
+  const [reposLoading, setReposLoading] = useState(true);
   const startedRef = useRef(false);
 
   // Opens the workspace once a session exists. No state is set synchronously
@@ -43,6 +53,26 @@ export function WorkspaceView() {
         if (cancelled) return;
         setProject(chosen);
         setChatSession(created);
+        setAccess({
+          project_id: chosen.id,
+          access_mode: chosen.access_mode,
+          repository_full_name: chosen.repository_full_name,
+          base_branch: null,
+          elevated_by: null,
+          elevated_at: null,
+        });
+
+        // A deployment without GitHub configured is a normal state, not an
+        // error: the panel says the App is installed nowhere and the rest of
+        // the workspace keeps working.
+        try {
+          const repos = await api.listRepositories();
+          if (!cancelled) setRepositories(repos);
+        } catch {
+          if (!cancelled) setRepositories([]);
+        } finally {
+          if (!cancelled) setReposLoading(false);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -117,7 +147,22 @@ export function WorkspaceView() {
         glyph: "◨",
         content: (
           <RegionErrorBoundary region="context panel">
-            <div className="p-4">
+            <div className="flex flex-col gap-6 p-4">
+              {project && access ? (
+                <RepositoryPanel
+                  project={project}
+                  repositories={repositories}
+                  access={access}
+                  loading={reposLoading}
+                  onBind={async (repositoryId, fullName, baseBranch) => {
+                    setAccess(
+                      await api.bindRepository(project.id, repositoryId, fullName, baseBranch),
+                    );
+                  }}
+                  onElevate={async () => setAccess(await api.elevateAccess(project.id))}
+                  onRevoke={async () => setAccess(await api.revokeAccess(project.id))}
+                />
+              ) : null}
               {approval ? (
                 <ApprovalCard
                   approval={approval}
