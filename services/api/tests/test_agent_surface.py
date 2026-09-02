@@ -106,6 +106,30 @@ def seed_prerequisites(client: TestClient, session_id: str) -> None:
     seed_patch(client, session_id)
 
 
+#: The agent router speaks only these two verbs. Everything that changes state
+#: is a POST, so sweeping POST paths sweeps every mutating route.
+#:
+#: This is enforced rather than assumed. A path-keyed sweep cannot see a PATCH
+#: added to a path a POST already covers — the path is "swept", the verb is not.
+#: Restricting the vocabulary closes that hole at the source.
+ALLOWED_METHODS = frozenset({"get", "post"})
+
+
+def test_the_agent_router_speaks_only_get_and_post(client: TestClient) -> None:
+    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+    offenders = [
+        f"{method.upper()} {path}"
+        for path, methods in paths.items()
+        if path.startswith("/api/agent")
+        for method in methods
+        if method not in ALLOWED_METHODS
+    ]
+    assert not offenders, (
+        "the agent router must use only GET and POST, so the POST sweep is complete. "
+        "Found: " + ", ".join(offenders)
+    )
+
+
 def test_every_agent_post_route_is_swept(client: TestClient) -> None:
     """The sweeps only guarantee anything if they cover the whole router.
 
@@ -113,10 +137,14 @@ def test_every_agent_post_route_is_swept(client: TestClient) -> None:
     that returns `started=True` and opens no gate left the entire suite green.
     """
     paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+    agent_paths = {p: m for p, m in paths.items() if p.startswith("/api/agent")}
+
+    # Complete only because `test_the_agent_router_speaks_only_get_and_post`
+    # holds: every mutating route is a POST, so every mutating route is here.
     posted = {
         path.removeprefix("/api/agent/sessions/{session_id}/")
-        for path, methods in paths.items()
-        if path.startswith("/api/agent") and "post" in methods
+        for path, methods in agent_paths.items()
+        if "post" in methods
     }
     swept = {path for path, _ in MUTATION_TOOLS} | {path for path, _ in STAGE_TOOLS}
     missing = posted - swept

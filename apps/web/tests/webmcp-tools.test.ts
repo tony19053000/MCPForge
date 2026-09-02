@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError } from "@/lib/api/client";
 import { MockModelContext, createAdapter } from "@/webmcp/adapter";
 import { registerMCPForgeTools } from "@/webmcp/register";
-import { createTools, mutationTools, readTools, safely } from "@/webmcp/tools";
+import { NOT_WIRED_NOTICE, createTools, mutationTools, readTools, safely } from "@/webmcp/tools";
 
 const SESSION = "sess_1";
 
@@ -247,23 +247,27 @@ describe("registration", () => {
 describe("tools do not advertise capability the code lacks", () => {
   const NOT_WIRED = ["start_repository_analysis", "generate_patch", "run_security_review", "run_validation"];
 
-  it("says so in the description of every stage that is not connected", () => {
+  it("carries the exact not-wired sentence, not a paraphrase of it", () => {
+    // Two rounds of review were spent on regexes that a plausible false promise
+    // walked past: first two literal prefixes, then a verb list that only
+    // matched third-person forms. Asserting the shared constant is present
+    // stops policing prose and pins the thing that actually has to be said.
     for (const tool of createTools(clientWith(() => ({})), SESSION)) {
       if (NOT_WIRED.includes(tool.name)) {
-        expect(tool.description, tool.name).toMatch(/not yet connected/i);
+        expect(tool.description, tool.name).toContain(NOT_WIRED_NOTICE);
       }
     }
   });
 
-  it("does not promise to run anything it does not run", () => {
-    // The previous version of this test checked two literal prefixes, so a
-    // description whose first sentence was exactly the false promise passed it.
-    // Present-tense capability verbs are what an agent reads as a commitment.
-    const PRESENT_TENSE = /\b(runs|starts|analyses|analyzes|executes|generates|returns pass)\b/i;
+  it("does not surround it with a forward promise", () => {
+    // A narrow screen, deliberately. A wider one flagged the honest phrase
+    // "Request analysis of…", which is how prose-policing regexes fail: they
+    // catch correct text and miss a fluent lie. The guarantee is the constant
+    // asserted above and the behavioural `started: false` pinned in both tiers;
+    // this only catches the most common contradiction, a "will do X" beside it.
     for (const tool of createTools(clientWith(() => ({})), SESSION)) {
       if (NOT_WIRED.includes(tool.name)) {
-        expect(tool.description, tool.name).not.toMatch(PRESENT_TENSE);
-        expect(tool.description, tool.name).toMatch(/^Request /);
+        expect(tool.description, tool.name).not.toMatch(/\bwill\b/i);
       }
     }
   });

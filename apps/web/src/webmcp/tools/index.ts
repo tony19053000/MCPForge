@@ -117,9 +117,9 @@ export function readTools(
       name: "start_repository_analysis",
       title: "Start repository analysis",
       description:
-        "Request analysis of the connected repository. Not yet connected to the " +
-        "orchestrator: the request is recorded and started is false. Analysis only " +
-        "reads the repository and writes nothing to it.",
+        "Request analysis of the connected repository. " +
+        NOT_WIRED_NOTICE +
+        " Analysis only reads the repository and writes nothing to it.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentStartAnalysis(sessionId)),
     },
@@ -134,6 +134,16 @@ export function readTools(
  * It is on the tool description, not only in the result, so a well-behaved
  * agent knows before calling that it is requesting rather than doing.
  */
+/**
+ * The exact sentence every stage that is not wired to the orchestrator carries.
+ *
+ * Exported so the test can assert the literal string is present, rather than
+ * pattern-matching the prose around it. Two rounds of review were spent on
+ * regexes that a plausible false promise walked straight past.
+ */
+export const NOT_WIRED_NOTICE =
+  "Not yet connected to the orchestrator: the request is recorded and started is false.";
+
 const NEEDS_APPROVAL =
   " This does not perform the action. It asks the developer to approve it in " +
   "MCPForge, and returns an approval id. An agent cannot approve its own request.";
@@ -208,8 +218,8 @@ export function mutationTools(
       title: "Request patch generation",
       description:
         "Request generation of the WebMCP code patch. Authorised by the approved tool " +
-        "plan, so it opens no gate of its own. Not yet connected to the generator: the " +
-        "request is recorded and started is false.",
+        "plan, so it opens no gate of its own. " +
+        NOT_WIRED_NOTICE,
       inputSchema: {
         type: "object",
         properties: {
@@ -229,9 +239,9 @@ export function mutationTools(
       name: "run_security_review",
       title: "Request a security review",
       description:
-        "Request a deterministic policy review of the patch. Not yet connected to the " +
-        "policy engine: the request is recorded and started is false. Any verdict is " +
-        "advisory and opens no gate.",
+        "Request a deterministic policy review of the patch. " +
+        NOT_WIRED_NOTICE +
+        " Any verdict is advisory and opens no gate.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentSecurityReview(sessionId)),
     },
@@ -239,9 +249,9 @@ export function mutationTools(
       name: "run_validation",
       title: "Request validation",
       description:
-        "Request that the generated tests run in the sandbox. Not yet connected to the " +
-        "executor: the request is recorded and started is false. Writes nothing to the " +
-        "repository.",
+        "Request that the generated tests run in the sandbox. " +
+        NOT_WIRED_NOTICE +
+        " Writes nothing to the repository.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentRunValidation(sessionId)),
     },
