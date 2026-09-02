@@ -10,11 +10,11 @@
 
 ## Current phase
 
-**Phase 6 — Security, Patch and PR Pipeline (60% → 70%)** — not yet started.
+**Phase 6 — Security, Patch and PR Pipeline (60% → 70%)** — implemented, in review.
 
 ## Current ticket
 
-`F6-01` — Deterministic policy engine — `PENDING`
+`F6-01`..`F6-04` — `IN_REVIEW`. `F6-05` (webhook) stays `PENDING`: it needs a public URL.
 
 ---
 
@@ -59,7 +59,12 @@
 
 ## In progress
 
-None.
+| Ticket | Title | Status |
+|---|---|---|
+| F6-01 | Deterministic policy engine | `IN_REVIEW` |
+| F6-02 | Branch and PR writer | `IN_REVIEW` |
+| F6-03 | Access mode elevation flow | `IN_REVIEW` — built in Phase 3, exercised here |
+| F6-04 | Rollback and failure handling | `IN_REVIEW` |
 
 ## Pending
 
@@ -87,7 +92,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **760 passing** — 152 web (Vitest/RTL), 608 API (pytest). A further 15 run against live Firestore when opted in |
+| Unit | **833 passing** — 152 web (Vitest/RTL), 681 API (pytest). A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -114,7 +119,8 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Secret filtering | Implemented. A fixture repository with thirteen planted credentials yields zero secret bytes downstream, and none in the quarantine records either. Quarantined files are never opened, and matching is case-folded — an earlier version read `.ENV`, `ID_RSA` and `Server.PEM` |
 | Network isolation | Real, via an unprivileged user+network namespace. Where the kernel disallows it the executor refuses to run rather than claiming an isolation it lacks |
 | Repository access mode | Implemented. `READ_ONLY` by default; elevation requires the project owner and records who and when; a demo project can never be elevated |
-| Branch protection | Writer not built yet (F6-02). The boundary that will guard it is implemented: one assertion helper every repository operation calls, refusing rebinding and refusing any repository other than the bound one |
+| Branch protection | Writer implemented and gated. Writes only to `mcpforge/*`, never the default or a protected name, refuses when the default branch is inside that namespace, and creates refs rather than updating them. No force-push or history-rewrite mechanism exists — asserted structurally |
+| Write preconditions | Bound repository, `WRITE_PR` mode, both `PATCH` and `PULL_REQUEST` approvals matching this session and covering the patch by hash, and the policy engine passing on the exact patch. An approval never overrides a policy violation |
 | Credentials in repository | None. `.env` ignored; `.env.example` contains names only |
 | Service-account keys | None, by design. Not created, not committed, not a supported configuration. Server-side Google access uses ADC |
 | Auth posture | Provisional Firebase Auth behind a `TokenVerifier` / `AuthProvider` port pair. Backend imports no Firebase SDK and needs no credentials to verify a token |

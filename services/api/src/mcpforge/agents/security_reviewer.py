@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from mcpforge.agents.architect import infer_risk_from_function
 from mcpforge.agents.base import Agent
-from mcpforge.models.analysis import Evidence
-from mcpforge.models.security import Finding, GateVerdict, SecurityReport, Severity
+from mcpforge.models.patch import GeneratedPatch
+from mcpforge.models.security import Finding, GateVerdict, SecurityReport
 from mcpforge.models.toolplan import ToolPlan
+from mcpforge.security.policy import evaluate_policy
 
 SYSTEM_INSTRUCTION = """
 You are the MCPForge Security Reviewer.
@@ -74,81 +74,25 @@ class SecurityReviewer(Agent[SecurityReviewInput, SecurityReport]):
 # ---------------------------------------------------------------------------
 
 
-def policy_findings(plan: ToolPlan) -> list[Finding]:
+def policy_findings(plan: ToolPlan, patch: GeneratedPatch | None = None) -> list[Finding]:
     """Our own checks, run regardless of what the agent said.
 
-    Deliberately narrow and mechanical: each one is a rule from
-    03_SECURITY_ACCESS.md §8 that can be decided without judgement.
-
-    Crucially, risk is **re-derived here** rather than read from `tool.risk`.
-    Both `risk` and `approval_required` are fields the model fills, so a check
-    that trusted them would be deterministic in name only: an unreconciled plan
-    marking `cancelReservation` as READ with no approval would sail through.
-    This function does not assume `reconcile_risk` has run.
+    Delegates to `security/policy.py`, which holds the rules as data so the set
+    can be read and counted rather than being scattered through branches.
     """
-    findings: list[Finding] = []
-
-    for tool in plan.tools:
-        inferred = infer_risk_from_function(tool.maps_to_function)
-        enforced = tool.risk if tool.risk.rank >= inferred.rank else inferred
-
-        if enforced.requires_approval and not tool.approval_required:
-            findings.append(
-                Finding(
-                    rule="approval-required-for-state-change",
-                    severity=Severity.CRITICAL,
-                    summary=(
-                        f"Tool '{tool.name}' is {enforced.value} but is not gated by "
-                        "human approval."
-                        + (
-                            f" The plan claimed {tool.risk.value}; "
-                            f"'{tool.maps_to_function}' reads as {inferred.value}."
-                            if enforced is not tool.risk
-                            else ""
-                        )
-                    ),
-                    recommendation="Set approval_required, or reduce what the tool does.",
-                    evidence=Evidence(path=tool.evidence[0].path, symbol=tool.maps_to_function),
-                    deterministic=True,
-                )
-            )
-
-        forbidden = tool.forbidden_parameters()
-        if forbidden:
-            findings.append(
-                Finding(
-                    rule="forbidden-parameter",
-                    severity=Severity.CRITICAL,
-                    summary=(
-                        f"Tool '{tool.name}' accepts {forbidden}, which grants authority "
-                        "the application never gave the caller."
-                    ),
-                    recommendation="Remove the parameter; derive it from the session instead.",
-                    evidence=Evidence(path=tool.evidence[0].path, symbol=tool.maps_to_function),
-                    deterministic=True,
-                )
-            )
-
-        if not tool.evidence:
-            findings.append(
-                Finding(
-                    rule="no-evidence",
-                    severity=Severity.HIGH,
-                    summary=f"Tool '{tool.name}' cites no source file.",
-                    recommendation="Map the tool to the function that implements it.",
-                    deterministic=True,
-                )
-            )
-
-    return findings
+    return evaluate_policy(plan, patch)
 
 
-def evaluate_gate(report: SecurityReport, plan: ToolPlan) -> GateVerdict:
+def evaluate_gate(
+    report: SecurityReport, plan: ToolPlan, patch: GeneratedPatch | None = None
+) -> GateVerdict:
     """Combine the agent's report with our own policy checks.
 
-    The orchestrator reads this, never the agent's `advisory_pass`.
+    The orchestrator reads this, never the agent's `advisory_pass`. When a patch
+    is supplied the patch rules run too, so the same gate covers both the plan a
+    human approved and the code that plan produced.
     """
-    deterministic = policy_findings(plan)
+    deterministic = policy_findings(plan, patch)
     combined = [*deterministic, *report.findings]
     blocking = [f for f in combined if f.severity.blocks]
     passed = not blocking
