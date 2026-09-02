@@ -13,6 +13,8 @@ from mcpforge.models.core import (
     Approval,
     ApprovalGate,
     ApprovalStatus,
+    Artifact,
+    ArtifactKind,
     Project,
     RunEvent,
     Session,
@@ -28,6 +30,7 @@ class InMemoryStore:
         self._turns: list[Turn] = []
         self._events: list[RunEvent] = []
         self._approvals: dict[str, Approval] = {}
+        self._artifacts: dict[tuple[str, ArtifactKind], Artifact] = {}
         self._lock = asyncio.Lock()
 
     # -- ownership ---------------------------------------------------------
@@ -146,3 +149,20 @@ class InMemoryStore:
             ):
                 return deepcopy(approval)
         return None
+
+    # -- artifacts ---------------------------------------------------------
+
+    async def put_artifact(self, artifact: Artifact) -> Artifact:
+        async with self._lock:
+            # Keyed by session and kind, so regenerating replaces rather than
+            # accumulates — that replacement is what invalidates an approval
+            # bound to the previous hash.
+            self._artifacts[(artifact.session_id, artifact.kind)] = deepcopy(artifact)
+        return artifact
+
+    async def get_artifact(
+        self, session_id: str, kind: ArtifactKind, owner_uid: str
+    ) -> Artifact | None:
+        await self._owned_session(session_id, owner_uid)
+        artifact = self._artifacts.get((session_id, kind))
+        return deepcopy(artifact) if artifact is not None else None

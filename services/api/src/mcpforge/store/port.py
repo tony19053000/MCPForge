@@ -14,6 +14,8 @@ from typing import Protocol, runtime_checkable
 from mcpforge.models.core import (
     Approval,
     ApprovalGate,
+    Artifact,
+    ArtifactKind,
     Project,
     RunEvent,
     Session,
@@ -58,3 +60,13 @@ class Store(Protocol):
     async def find_approval(
         self, session_id: str, gate: ApprovalGate, artifact_hash: str, owner_uid: str
     ) -> Approval | None: ...
+
+    # Artifacts
+    #
+    # Stored so an approval's hash can be derived from persisted content rather
+    # than accepted from the caller. At most one artifact per session and kind;
+    # writing again replaces it, which is what invalidates a prior approval.
+    async def put_artifact(self, artifact: Artifact) -> Artifact: ...
+    async def get_artifact(
+        self, session_id: str, kind: ArtifactKind, owner_uid: str
+    ) -> Artifact | None: ...

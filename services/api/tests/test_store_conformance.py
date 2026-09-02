@@ -18,6 +18,8 @@ from mcpforge.models.core import (
     Approval,
     ApprovalGate,
     ApprovalStatus,
+    Artifact,
+    ArtifactKind,
     Origin,
     Project,
     RunEvent,
@@ -290,3 +292,95 @@ def test_ownership_is_filtered_in_the_query_not_after_the_fetch() -> None:
     assert 'FieldFilter("owner_uid", "==", owner_uid)' in code, (
         "list_projects must filter by owner in the Firestore query"
     )
+
+# -- artifacts -------------------------------------------------------------
+
+
+async def test_artifact_round_trip(store: Store) -> None:
+    _project, session = await make_session(store)
+    await store.put_artifact(
+        Artifact(
+            session_id=session.id,
+            project_id=session.project_id,
+            kind=ArtifactKind.TOOL_PLAN,
+            payload={"tools": ["search_rooms"]},
+        )
+    )
+    stored = await store.get_artifact(session.id, ArtifactKind.TOOL_PLAN, OWNER)
+    assert stored is not None
+    assert stored.payload == {"tools": ["search_rooms"]}
+
+
+async def test_a_missing_artifact_is_none_not_an_error(store: Store) -> None:
+    _project, session = await make_session(store)
+    assert await store.get_artifact(session.id, ArtifactKind.PATCH, OWNER) is None
+
+
+async def test_writing_an_artifact_again_replaces_it(store: Store) -> None:
+    """Regeneration must replace, so the derived hash changes and any approval
+    bound to the previous hash stops covering it."""
+    _project, session = await make_session(store)
+    first = Artifact(
+        session_id=session.id,
+        project_id=session.project_id,
+        kind=ArtifactKind.TOOL_PLAN,
+        payload={"tools": ["a"]},
+    )
+    await store.put_artifact(first)
+    second = Artifact(
+        session_id=session.id,
+        project_id=session.project_id,
+        kind=ArtifactKind.TOOL_PLAN,
+        payload={"tools": ["a", "b"]},
+    )
+    await store.put_artifact(second)
+
+    stored = await store.get_artifact(session.id, ArtifactKind.TOOL_PLAN, OWNER)
+    assert stored is not None
+    assert stored.payload == {"tools": ["a", "b"]}
+    assert stored.hash != first.hash
+
+
+async def test_artifact_kinds_do_not_collide(store: Store) -> None:
+    _project, session = await make_session(store)
+    for kind in (ArtifactKind.TOOL_PLAN, ArtifactKind.PATCH):
+        await store.put_artifact(
+            Artifact(
+                session_id=session.id,
+                project_id=session.project_id,
+                kind=kind,
+                payload={"kind": kind.value},
+            )
+        )
+    plan = await store.get_artifact(session.id, ArtifactKind.TOOL_PLAN, OWNER)
+    patch = await store.get_artifact(session.id, ArtifactKind.PATCH, OWNER)
+    assert plan is not None and patch is not None
+    assert plan.payload != patch.payload
+
+
+async def test_another_user_cannot_read_an_artifact(store: Store) -> None:
+    _project, session = await make_session(store)
+    await store.put_artifact(
+        Artifact(
+            session_id=session.id,
+            project_id=session.project_id,
+            kind=ArtifactKind.PATCH,
+            payload={"secret": "not yours"},
+        )
+    )
+    with pytest.raises(NotFoundError):
+        await store.get_artifact(session.id, ArtifactKind.PATCH, OTHER)
+
+
+async def test_an_artifact_hash_is_derived_from_content_not_stored(store: Store) -> None:
+    """The hash an approval binds to must come from the payload, so a caller
+    cannot present content and claim an unrelated hash for it."""
+    _project, session = await make_session(store)
+    artifact = Artifact(
+        session_id=session.id,
+        project_id=session.project_id,
+        kind=ArtifactKind.PATCH,
+        payload={"files": 3},
+    )
+    assert artifact.hash == artifact_hash({"files": 3})
+    assert "hash" not in artifact.model_dump()

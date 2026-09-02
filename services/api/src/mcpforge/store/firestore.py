@@ -21,6 +21,8 @@ from mcpforge.models.core import (
     Approval,
     ApprovalGate,
     ApprovalStatus,
+    Artifact,
+    ArtifactKind,
     Project,
     RunEvent,
     Session,
@@ -33,6 +35,7 @@ SESSIONS = "sessions"
 TURNS = "turns"
 EVENTS = "events"
 APPROVALS = "approvals"
+ARTIFACTS = "artifacts"
 
 
 class FirestoreStore:
@@ -175,3 +178,28 @@ class FirestoreStore:
         async for doc in query.stream():
             return Approval.model_validate(doc.to_dict())
         return None
+
+    # -- artifacts ---------------------------------------------------------
+
+    def _artifact_id(self, session_id: str, kind: ArtifactKind) -> str:
+        """Deterministic id, so writing again replaces rather than accumulates.
+
+        That replacement is what invalidates an approval bound to the previous
+        hash — the same behaviour the in-memory adapter has.
+        """
+        return f"{session_id}__{kind.value}"
+
+    async def put_artifact(self, artifact: Artifact) -> Artifact:
+        doc = self._artifact_id(artifact.session_id, artifact.kind)
+        await self._db.collection(ARTIFACTS).document(doc).set(self._to_dict(artifact))
+        return artifact
+
+    async def get_artifact(
+        self, session_id: str, kind: ArtifactKind, owner_uid: str
+    ) -> Artifact | None:
+        await self._owned_session(session_id, owner_uid)
+        snapshot = await self._db.collection(ARTIFACTS).document(
+            self._artifact_id(session_id, kind)
+        ).get()
+        data = snapshot.to_dict() if snapshot.exists else None
+        return Artifact.model_validate(data) if data is not None else None

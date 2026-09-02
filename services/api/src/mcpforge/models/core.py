@@ -71,12 +71,20 @@ class AccessMode(StrEnum):
 
 
 class ApprovalGate(StrEnum):
-    """Named gates. Approving one never approves another."""
+    """Named gates. Approving one never approves another.
+
+    `REPOSITORY_BINDING` and `WORKFLOW_SELECTION` exist because an agent may ask
+    for those two things (F7-03) where a human does them directly in the UI —
+    the click is the human's decision, an agent's request is not. Both gates are
+    therefore only ever *requested* by the agent surface.
+    """
 
     TOOL_PLAN = "TOOL_PLAN"
     PATCH = "PATCH"
     PULL_REQUEST = "PULL_REQUEST"
     ACCESS_ELEVATION = "ACCESS_ELEVATION"
+    REPOSITORY_BINDING = "REPOSITORY_BINDING"
+    WORKFLOW_SELECTION = "WORKFLOW_SELECTION"
 
 
 class ApprovalStatus(StrEnum):
@@ -148,6 +156,44 @@ class RunEvent(BaseModel):
     detail: dict[str, Any] = Field(default_factory=dict)
     origin: Origin = Origin.SYSTEM
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class ArtifactKind(StrEnum):
+    """What a stored artifact is.
+
+    An artifact is the thing a human is asked to approve. Storing it is what
+    lets the approval hash be derived here from persisted content rather than
+    accepted from whoever is asking — which matters most on the agent surface.
+    """
+
+    ANALYSIS = "ANALYSIS"
+    REPOSITORY_BINDING = "REPOSITORY_BINDING"
+    WORKFLOW_SELECTION = "WORKFLOW_SELECTION"
+    TOOL_PLAN = "TOOL_PLAN"
+    PATCH = "PATCH"
+    SECURITY_REVIEW = "SECURITY_REVIEW"
+    VALIDATION = "VALIDATION"
+    PULL_REQUEST = "PULL_REQUEST"
+
+
+class Artifact(BaseModel):
+    """One stored run artifact, at most one per session and kind.
+
+    `payload` holds task-level structured data only — never repository file
+    bodies and never model reasoning, for the same reason `RunEvent` does not.
+    """
+
+    id: str = Field(default_factory=lambda: new_id("art"))
+    session_id: str
+    project_id: str
+    kind: ArtifactKind
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def hash(self) -> str:
+        """The hash an approval binds to. Derived, never stored or supplied."""
+        return artifact_hash(self.payload)
 
 
 class Approval(BaseModel):

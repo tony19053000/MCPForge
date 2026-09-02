@@ -24,6 +24,7 @@ from mcpforge.models.core import (
     ApprovalStatus,
     Origin,
     RunEvent,
+    Session,
     utcnow,
 )
 from mcpforge.store.port import NotFoundError, Store
@@ -73,6 +74,38 @@ def _store(request: Request) -> Store:
     return store
 
 
+async def open_gate_request(
+    store: Store,
+    session: Session,
+    *,
+    gate: ApprovalGate,
+    artifact_hash: str,
+    summary: str,
+) -> Approval:
+    """Create the PENDING approval a gate waits on.
+
+    Both the human UI (`request_approval` below) and the agent surface
+    (`api/agent.py`) go through this one function. That is deliberate: if the
+    agent had its own approval-creation path, an agent-only route around the
+    gate could open up in it without the human path ever changing. There is one
+    path, so there is one thing to get right.
+
+    It creates a decision to be made. It never makes one — the returned approval
+    is always PENDING, and only `decide_approval` can change that.
+    """
+    approval = await store.create_approval(
+        Approval(
+            project_id=session.project_id,
+            session_id=session.id,
+            gate=gate,
+            artifact_hash=artifact_hash,
+            summary=summary,
+        )
+    )
+    assert approval.status is ApprovalStatus.PENDING
+    return approval
+
+
 @router.post("/sessions/{session_id}/approvals", response_model=ApprovalResponse, status_code=201)
 async def request_approval(
     session_id: str, body: RequestApprovalBody, identity: CurrentIdentity, request: Request
@@ -83,14 +116,12 @@ async def request_approval(
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found") from exc
 
-    approval = await store.create_approval(
-        Approval(
-            project_id=session.project_id,
-            session_id=session.id,
-            gate=body.gate,
-            artifact_hash=body.artifact_hash,
-            summary=body.summary,
-        )
+    approval = await open_gate_request(
+        store,
+        session,
+        gate=body.gate,
+        artifact_hash=body.artifact_hash,
+        summary=body.summary,
     )
     await store.append_event(
         RunEvent(
