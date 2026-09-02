@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import pytest
@@ -65,8 +66,8 @@ def analysis() -> CodebaseAnalysis:
     )
 
 
-def plan_data(**overrides: object) -> dict[str, object]:
-    tool = {
+def plan_data(**overrides: object) -> dict[str, Any]:
+    tool: dict[str, Any] = {
         "name": "search_rooms",
         "title": "Search rooms",
         "description": "Find rooms matching guests and price.",
@@ -178,7 +179,7 @@ async def test_duplicate_tool_names_are_rejected(
     index: RepositoryIndex, analysis: CodebaseAnalysis
 ) -> None:
     data = plan_data()
-    data["tools"] = [data["tools"][0], dict(data["tools"][0])]  # type: ignore[index]
+    data["tools"] = [data["tools"][0], dict(data["tools"][0])]
     agent = WorkflowArchitect(FakeGeminiProvider([data] * 4))
     with pytest.raises(AgentOutputError):
         await agent.run(
@@ -278,7 +279,7 @@ def test_approval_required_is_derived_not_taken_from_the_model() -> None:
         workflow_id="cancel",
         risk="DESTRUCTIVE",
     )
-    data["tools"][0]["approval_required"] = False  # type: ignore[index]
+    data["tools"][0]["approval_required"] = False
 
     reconciled, _ = reconcile_risk(ToolPlan.model_validate(data))
     assert reconciled.tools[0].approval_required is True
