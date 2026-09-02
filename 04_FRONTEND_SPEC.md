@@ -87,7 +87,16 @@ Skeletons that match final layout (no layout shift), a determinate progress bar 
 
 ## 6. Code diff view
 
-Per file: path · language · additions/removals count · unified or split view · syntax highlighting · collapsed unchanged regions.
+Per file: path · language · additions/removals count · collapsed unchanged regions.
+
+**MVP scope, recorded rather than implied.** Syntax highlighting and the
+unified/split view toggle are deferred: both are presentation, and a reviewer
+approving a patch needs the *content* and the *reason* far more than they need
+colour. They land with `F9-03` alongside the accessibility pass, where theming a
+highlighter can be done once against both themes. Virtualization is also
+deferred — a generated patch is a handful of new files, and files beyond the
+first three render only when opened, which is what keeps a large patch
+responsive today. Revisit if patches ever modify many existing files.
 
 Each file carries:
 - **Why this file changes** — one sentence, plain language.

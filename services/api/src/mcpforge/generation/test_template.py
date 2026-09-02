@@ -47,41 +47,51 @@ def valid_arguments(tool: WebMCPTool, *, override: tuple[str, str] | None = None
 
 def test_file(tool: WebMCPTool, header: str) -> str:
     first = tool.inputs[0] if tool.inputs else None
+    args = valid_arguments(tool)
 
     if tool.approval_required:
-        behaviour = (
-            '  it("refuses to act without approval", async () => {\n'
-            f"    // {tool.risk.value}: it must request approval rather than calling\n"
-            f"    // {tool.source.symbol}(). If this passes without an approval being\n"
-            "    // requested, the gate has been removed.\n"
-            f"    const result = await {tool.handler_name}({{ {valid_arguments(tool)} }});\n"
-            '    expect("awaitingApproval" in result).toBe(true);\n'
-            "  });"
-        )
+        lines = [
+            '  it("refuses to act without approval", async () => {',
+            f"    // {tool.risk.value}: it must request approval rather than calling",
+            f"    // {tool.source.symbol}(). If this passes without an approval being",
+            "    // requested, the gate has been removed.",
+            "    //",
+            "    // The approval endpoint is yours to implement. It is stubbed here so",
+            "    // this test passes on first run rather than failing for a reason that",
+            "    // is not about this tool.",
+            '    vi.stubGlobal("fetch", vi.fn(async () =>',
+            '      Response.json({ approvalId: "test-approval" }),',
+            "    ));",
+            f"    const result = await {tool.handler_name}({{ {args} }});",
+            '    expect("awaitingApproval" in result).toBe(true);',
+            "  });",
+        ]
     else:
-        behaviour = (
-            '  it("returns a result for valid input", async () => {\n'
-            f"    const result = await {tool.handler_name}({{ {valid_arguments(tool)} }});\n"
-            "    expect(result.ok).toBe(true);\n"
-            "  });"
-        )
+        lines = [
+            '  it("returns a result for valid input", async () => {',
+            f"    const result = await {tool.handler_name}({{ {args} }});",
+            "    expect(result.ok).toBe(true);",
+            "  });",
+        ]
 
-    invalid = ""
     if first is not None:
-        args = valid_arguments(tool, override=(first.name, _WRONG[first.json_type]))
-        invalid = (
-            "\n\n"
-            f'  it("rejects the wrong type for {first.name}", async () => {{\n'
-            f"    const result = await {tool.handler_name}({{ {args} }});\n"
-            '    expect(result).toMatchObject({ ok: false, code: "invalid_input" });\n'
-            "  });"
-        )
+        wrong = valid_arguments(tool, override=(first.name, _WRONG[first.json_type]))
+        lines += [
+            "",
+            f'  it("rejects the wrong type for {first.name}", async () => {{',
+            f"    const result = await {tool.handler_name}({{ {wrong} }});",
+            '    expect(result).toMatchObject({ ok: false, code: "invalid_input" });',
+            "  });",
+        ]
+
+    imports = "describe, expect, it" + (", vi" if tool.approval_required else "")
+    behaviour = "\n".join(lines)
 
     return (
         f"{header}\n"
-        'import { describe, expect, it } from "vitest";\n\n'
+        f'import {{ {imports} }} from "vitest";\n\n'
         f'import {{ {tool.handler_name} }} from "@/webmcp/tools/{tool.handler_name}";\n\n'
         f"describe({as_ts_string(tool.name)}, () => {{\n"
-        f"{behaviour}{invalid}\n"
+        f"{behaviour}\n"
         "});\n"
     )

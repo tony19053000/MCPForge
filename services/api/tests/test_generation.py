@@ -571,3 +571,105 @@ def test_generated_tests_are_escaped_like_everything_else() -> None:
         if f.path.endswith("searchRooms.test.ts")
     ).contents
     assert 'describe("search_rooms"' in source
+
+
+# -- patch application — F5-03 Tests ---------------------------------------
+
+
+def test_a_generated_patch_applies_to_the_fixture() -> None:
+    """Every FileChange lands at its declared path with its declared contents.
+
+    F5-03 requires this in the suite, not only in a manual script:
+    `02_ARCHITECTURE.md` §2 says scripts are never run in CI, so a criterion
+    satisfied only by a script is a criterion nothing enforces.
+    """
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    demo = Path(__file__).resolve().parents[3] / "fixtures" / "demo-hotel-app"
+    if not demo.is_dir():
+        pytest.skip("demo fixture not present")
+
+    patch = generate_patch(
+        WebMCPToolset(tools=[read_tool(), destructive_tool()]), base_commit="abc123"
+    )
+
+    workspace = Path(tempfile.mkdtemp(prefix="mcpforge-apply-"))
+    target = workspace / "app"
+    try:
+        shutil.copytree(demo, target, ignore=shutil.ignore_patterns("node_modules", ".next"))
+
+        for change in patch.files:
+            destination = target / change.path
+            # Nothing may land outside the repository copy.
+            assert destination.resolve().is_relative_to(target.resolve()), change.path
+            # A generated patch adds files; it must not silently clobber one.
+            assert not destination.exists(), f"{change.path} already exists in the fixture"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(change.contents)
+
+        for change in patch.files:
+            assert (target / change.path).read_text() == change.contents
+
+        # The developer's own source is untouched.
+        original = demo / "src" / "lib" / "reservations.ts"
+        assert (target / "src/lib/reservations.ts").read_text() == original.read_text()
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+def test_a_generated_patch_only_adds_files() -> None:
+    """Phase 5 never modifies existing source, so a failed apply cannot damage
+    the developer's code."""
+    patch = generate_patch(WebMCPToolset(tools=[read_tool(), destructive_tool()]))
+    assert {f.kind for f in patch.files} == {ChangeKind.ADD}
+    assert all(f.path.startswith(f"{WEBMCP_DIR}/") for f in patch.files)
+
+
+# -- generated identifiers must not be shadowed ----------------------------
+
+
+# `raw` is already refused as a forbidden parameter, for a different reason.
+@pytest.mark.parametrize("name", ["result", "failed", "ok", "input", "approvalId"])
+def test_an_input_named_like_a_generated_local_is_refused(name: str) -> None:
+    """It would shadow a local or an import and the file would not compile.
+
+    Loud rather than silent, but refusing at contract level beats discovering it
+    after a human has approved the plan.
+    """
+    with pytest.raises(ValidationError, match="collides with an identifier"):
+        read_tool(
+            inputs=[{"name": name, "json_type": "string", "description": "x"}],
+            source={"module": "@/lib/rooms", "symbol": "searchRooms", "parameters": []},
+        )
+
+
+def test_ordinary_input_names_are_still_accepted() -> None:
+    read_tool(
+        inputs=[{"name": "roomId", "json_type": "string", "description": "x"}],
+        source={"module": "@/lib/rooms", "symbol": "searchRooms", "parameters": ["roomId"]},
+    )
+
+
+def test_a_generated_test_for_a_gated_tool_stubs_the_approval_endpoint() -> None:
+    """The endpoint is the developer's to write, so the test must not fail on
+    its absence the first time they run it."""
+    source = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[destructive_tool()])).files
+        if f.path.endswith("cancelReservation.test.ts")
+    ).contents
+    assert 'vi.stubGlobal("fetch"' in source
+    assert "approvalId" in source
+    assert 'import { describe, expect, it, vi } from "vitest"' in source
+
+
+def test_a_generated_test_for_an_ungated_tool_needs_no_stub() -> None:
+    source = next(
+        f
+        for f in generate_patch(WebMCPToolset(tools=[read_tool()])).files
+        if f.path.endswith("searchRooms.test.ts")
+    ).contents
+    assert "vi.stubGlobal" not in source
+    assert 'import { describe, expect, it } from "vitest"' in source

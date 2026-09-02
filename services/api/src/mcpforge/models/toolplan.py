@@ -58,6 +58,23 @@ FORBIDDEN_PARAMETER_NAMES = frozenset(
     }
 )
 
+#: Identifiers the generator declares inside a handler. A tool input with one
+#: of these names shadows a local or an import, so the generated file does not
+#: compile. It fails loudly rather than silently, but refusing at contract
+#: level beats discovering it after a human has approved the plan.
+GENERATED_IDENTIFIERS = frozenset(
+    {
+        "raw",
+        "result",
+        "input",
+        "ok",
+        "failed",
+        "awaitingapproval",
+        "approvalid",
+        "requestapproval",
+    }
+)
+
 
 class ToolParameter(BaseModel):
     name: str = Field(min_length=1, max_length=40)

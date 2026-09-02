@@ -18,7 +18,11 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from mcpforge.models.analysis import Evidence, RiskClass
-from mcpforge.models.toolplan import FORBIDDEN_PARAMETER_NAMES, TOOL_NAME_PATTERN
+from mcpforge.models.toolplan import (
+    FORBIDDEN_PARAMETER_NAMES,
+    GENERATED_IDENTIFIERS,
+    TOOL_NAME_PATTERN,
+)
 
 #: A generated identifier must be a plain TypeScript identifier. Anything else
 #: is either a mistake or an injection attempt into the generated file.
@@ -45,6 +49,11 @@ class ToolInputProperty(BaseModel):
             raise ValueError(f"{v!r} is not a valid TypeScript identifier")
         if v.lower() in FORBIDDEN_PARAMETER_NAMES:
             raise ValueError(f"{v!r} grants authority the application never gave the caller")
+        if v.lower() in GENERATED_IDENTIFIERS:
+            raise ValueError(
+                f"{v!r} collides with an identifier the generator declares; "
+                "the generated file would not compile"
+            )
         return v
 
     @field_validator("json_type")
@@ -114,6 +123,11 @@ class SourceBinding(BaseModel):
         if not SAFE_IMPORT.match(v):
             raise ValueError(
                 f"{v!r} is not a safe import specifier; generated files use the @/ alias"
+            )
+        if v.lower() in GENERATED_IDENTIFIERS:
+            raise ValueError(
+                f"{v!r} collides with an identifier the generator declares; "
+                "the generated file would not compile"
             )
         return v
 

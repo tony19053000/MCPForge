@@ -360,7 +360,8 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Files.** `services/api/src/mcpforge/models/patch.py`, `apps/web/src/components/diff/**`
 **Dependencies.** F5-02
 **Implementation.** File changes with per-file rationale and affected tool; unified diff generation; diff viewer per `04_FRONTEND_SPEC.md` §6.
-**Acceptance criteria.** The patch applies cleanly to the base commit; each file shows a plain-language rationale and its tool chip; a large diff renders without blocking the main thread.
+**Acceptance criteria.** The patch applies cleanly to the base commit; each file shows a plain-language rationale and its tool chip; a large diff renders without blocking the main thread by deferring unopened files.
+**Scope note.** Syntax highlighting, the unified/split toggle and a patch header carrying the base commit and target branch are deferred to `F9-03` — see `04_FRONTEND_SPEC.md` §6. The branch and base commit are surfaced by the pull-request approval card in `F6-02`, which is where a developer actually needs them.
 **Tests.** Patch-application test against the fixture; diff rendering and virtualization tests; rationale-presence test.
 **Security.** Patch is scanned for secrets before display and again before PR creation (§4.4).
 **Status.** `IN_REVIEW`
