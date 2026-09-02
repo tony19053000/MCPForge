@@ -65,7 +65,7 @@ MCPForge/
 │       │   ├── auth/           TokenVerifier port + provisional Firebase adapter
 │       │   ├── api/            HTTP routers (thin; no business logic)
 │       │   ├── agents/         the six runtime agents
-│       │   ├── orchestration/  state machine, run loop, events
+│       │   ├── orchestration/  machine.py — the enforcement point for §6
 │       │   ├── gemini/         provider abstraction over google-genai
 │       │   ├── indexing/       repository index pipeline
 │       │   ├── security/       secret filter, path policy, prompt-context redaction
@@ -242,7 +242,7 @@ Rules:
 
 Because the approval carries the artifact hash, a regenerated patch invalidates a prior approval automatically.
 
-**Not yet built (Phase 4, ticket F4-05).** The table and its errors exist and are tested, but no production code consults them yet. The retry bound, the halt-and-report terminal state, and the persisted transition record (actor, timestamp, cause) all land with the orchestrator. Until then, do not describe transitions as enforced.
+Enforcement lives in `orchestration/machine.py`. `RunMachine.transition` is the only way a session changes state: it checks the table, checks the gate where one applies, persists the transition with actor, origin and cause, and emits a `state.changed` event. `record_failure_loop` bounds regeneration and halts loudly on exhaustion.
 
 ## 7. Activity events
 

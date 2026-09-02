@@ -1,12 +1,9 @@
 """The legal state transition table — 02_ARCHITECTURE.md §6.
 
-**Status: this module is data and vocabulary, not yet an enforcement point.**
-The orchestrator that consults it lands in Phase 4 (ticket F4-05). Until then
-`is_legal`, `gate_for`, `AWAITING_HUMAN`, `IllegalTransitionError` and
-`ApprovalRequiredError` are defined and tested but called by no production code.
-Do not describe them as enforced anywhere until F4-05 lands.
+This module is the table. `orchestration/machine.py` is the code that consults
+it, and every state change in the product goes through `RunMachine.transition`.
 
-What the table encodes, and what F4-05 must enforce:
+What the table encodes, and what `RunMachine` enforces:
 
 - Every transition is checked against `LEGAL`. An illegal transition raises; it
   does not warn.
@@ -16,6 +13,8 @@ What the table encodes, and what F4-05 must enforce:
   which is what makes "unreachable without an approval" checkable.
 - Retries self-loop on the running step rather than falling back into an
   already-approved state.
+- Failure loops are bounded; on exhaustion the run halts and reports rather
+  than spinning.
 """
 
 from __future__ import annotations
