@@ -109,7 +109,8 @@ export function readTools(
       title: "Get the validation report",
       description:
         "Get the result of running the generated tests in the sandbox: what passed, " +
-        "what failed, and the readiness score.",
+        "what failed, and the readiness score. Returns available: false until a " +
+        "validation run has produced a report.",
       inputSchema: NO_INPUT,
       execute: () => safely(() => client.agentValidation(sessionId)),
     },
@@ -129,12 +130,6 @@ export function readTools(
 // -- F7-03 gated mutation tools ---------------------------------------------
 
 /**
- * The sentence every mutation tool puts in front of the agent.
- *
- * It is on the tool description, not only in the result, so a well-behaved
- * agent knows before calling that it is requesting rather than doing.
- */
-/**
  * The exact sentence every stage that is not wired to the orchestrator carries.
  *
  * Exported so the test can assert the literal string is present, rather than
@@ -144,6 +139,12 @@ export function readTools(
 export const NOT_WIRED_NOTICE =
   "Not yet connected to the orchestrator: the request is recorded and started is false.";
 
+/**
+ * The sentence every mutation tool puts in front of the agent.
+ *
+ * It is on the tool description, not only in the result, so a well-behaved
+ * agent knows before calling that it is requesting rather than doing.
+ */
 const NEEDS_APPROVAL =
   " This does not perform the action. It asks the developer to approve it in " +
   "MCPForge, and returns an approval id. An agent cannot approve its own request.";

@@ -13,6 +13,7 @@ import pathlib
 from collections.abc import Iterator
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from mcpforge.auth.identity import AuthError, VerifiedIdentity
@@ -106,53 +107,134 @@ def seed_prerequisites(client: TestClient, session_id: str) -> None:
     seed_patch(client, session_id)
 
 
-#: The agent router speaks only these two verbs. Everything that changes state
-#: is a POST, so sweeping POST paths sweeps every mutating route.
+#: Every GET on the agent router, and what a read must never do.
 #:
-#: This is enforced rather than assumed. A path-keyed sweep cannot see a PATCH
-#: added to a path a POST already covers — the path is "swept", the verb is not.
-#: Restricting the vocabulary closes that hole at the source.
+#: A GET is not automatically safe. The reviewer demonstrated a GET endpoint on
+#: this router that self-approved any gate while all 767 tests stayed green: it
+#: was not a POST, so the vocabulary test passed it; its path held neither
+#: "decide" nor "approvals"; it constructed no `Approval`; it passed no `origin`.
+#: Every structural guard was satisfied by an endpoint doing the exact inverse of
+#: this phase's claim. Reads are therefore enumerated and constrained too.
+READ_TOOLS: list[str] = ["status", "workflows", "plan", "validation"]
+
+#: The agent router speaks only these two verbs. Restricting the vocabulary is
+#: what lets the sweeps below be keyed on path: a PATCH added to a path a POST
+#: already covers would otherwise be "swept" while the verb was not.
 ALLOWED_METHODS = frozenset({"get", "post"})
 
 
+def agent_routes(client: TestClient) -> list[tuple[str, str]]:
+    """Every (method, path) actually mounted on the agent router.
+
+    Read from `app.routes`, not from `app.openapi()`. FastAPI omits
+    `include_in_schema=False` routes from the OpenAPI document, so a route
+    hidden with one extra keyword argument was invisible to the very tests that
+    exist to prove nothing is hidden. `app.routes` is what is served.
+    """
+    found: list[tuple[str, str]] = []
+
+    def walk(routes: object) -> None:
+        # This FastAPI version wraps `include_router` results rather than
+        # flattening them onto `app.routes`, so a non-recursive scan finds four
+        # docs routes and nothing else — and every sweep built on it passes
+        # vacuously. `test_the_route_enumeration_actually_finds_the_router`
+        # exists because that is exactly what happened here.
+        for route in routes:  # type: ignore[attr-defined]
+            if isinstance(route, APIRoute):
+                if route.path.startswith("/api/agent"):
+                    found.extend(
+                        (method.lower(), route.path)
+                        for method in route.methods or set()
+                        if method.upper() not in {"HEAD", "OPTIONS"}
+                    )
+            else:
+                # This FastAPI version wraps an included router in an
+                # `_IncludedRouter` that exposes neither `path` nor `routes`.
+                # The real APIRouter is behind `original_router`.
+                nested = getattr(route, "original_router", None) or route
+                child = getattr(nested, "routes", None)
+                if child is not None:
+                    walk(child)
+
+    walk(client.app.routes)  # type: ignore[attr-defined]
+    return found
+
+
+def test_the_route_enumeration_actually_finds_the_router(client: TestClient) -> None:
+    """A guard on the guards.
+
+    Every sweep in this file is built on `agent_routes`. If it returns nothing —
+    as it did when it scanned only the top level of `app.routes` — every one of
+    them passes while checking nothing.
+    """
+    found = agent_routes(client)
+    assert len(found) >= 12, f"agent_routes found only {len(found)} routes: {found}"
+    assert ("post", "/api/agent/sessions/{session_id}/pull-request") in found
+    assert ("get", "/api/agent/sessions/{session_id}/status") in found
+
+
 def test_the_agent_router_speaks_only_get_and_post(client: TestClient) -> None:
-    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
     offenders = [
         f"{method.upper()} {path}"
-        for path, methods in paths.items()
-        if path.startswith("/api/agent")
-        for method in methods
+        for method, path in agent_routes(client)
         if method not in ALLOWED_METHODS
     ]
     assert not offenders, (
-        "the agent router must use only GET and POST, so the POST sweep is complete. "
-        "Found: " + ", ".join(offenders)
+        "the agent router must use only GET and POST, so the path-keyed sweeps are "
+        "complete. Found: " + ", ".join(offenders)
     )
 
 
-def test_every_agent_post_route_is_swept(client: TestClient) -> None:
-    """The sweeps only guarantee anything if they cover the whole router.
+def test_every_agent_route_is_classified(client: TestClient) -> None:
+    """No route of any verb reaches the agent surface unclassified.
 
-    Reproducing the gap this closes: adding a POST endpoint to `api/agent.py`
-    that returns `started=True` and opens no gate left the entire suite green.
+    Both axes, from what is mounted rather than from what is documented. Adding
+    a route means putting it in a bucket, and each bucket has tests attached:
+    MUTATION_TOOLS must open a gate, STAGE_TOOLS must not, READ_TOOLS must
+    neither write nor decide.
     """
-    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
-    agent_paths = {p: m for p, m in paths.items() if p.startswith("/api/agent")}
-
-    # Complete only because `test_the_agent_router_speaks_only_get_and_post`
-    # holds: every mutating route is a POST, so every mutating route is here.
-    posted = {
-        path.removeprefix("/api/agent/sessions/{session_id}/")
-        for path, methods in agent_paths.items()
-        if "post" in methods
+    prefix = "/api/agent/sessions/{session_id}/"
+    classified = {("post", p) for p, _ in MUTATION_TOOLS + STAGE_TOOLS} | {
+        ("get", p) for p in READ_TOOLS
     }
-    swept = {path for path, _ in MUTATION_TOOLS} | {path for path, _ in STAGE_TOOLS}
-    missing = posted - swept
-    assert not missing, (
-        "agent POST routes covered by no sweep: "
-        + ", ".join(sorted(missing))
-        + ". Add each to MUTATION_TOOLS (it opens a gate) or STAGE_TOOLS (it does not)."
+
+    unclassified = {
+        (method, path.removeprefix(prefix)) for method, path in agent_routes(client)
+    } - classified
+
+    assert not unclassified, (
+        "agent routes in no bucket: "
+        + ", ".join(f"{m.upper()} {p}" for m, p in sorted(unclassified))
+        + ". Add each to MUTATION_TOOLS (opens a gate), STAGE_TOOLS (records only) "
+        "or READ_TOOLS (reads only)."
     )
+
+
+@pytest.mark.parametrize("path", READ_TOOLS)
+def test_a_read_tool_changes_nothing(client: TestClient, path: str) -> None:
+    """A GET must not write an event, and must not touch an approval.
+
+    This is what makes classifying a route as a read mean something. The
+    reviewer's self-approving GET is caught here even if it were listed in
+    READ_TOOLS.
+    """
+    session_id = make_session(client)
+    seed_prerequisites(client, session_id)
+    asked = client.post(
+        f"/api/agent/sessions/{session_id}/workflows",
+        json={"workflow_ids": ["a"]},
+        headers=auth(),
+    ).json()
+
+    before = client.get(f"/api/sessions/{session_id}/events", headers=auth()).json()
+    response = client.get(f"/api/agent/sessions/{session_id}/{path}", headers=auth())
+    assert response.status_code == 200, path
+    after = client.get(f"/api/sessions/{session_id}/events", headers=auth()).json()
+
+    assert len(after) == len(before), f"GET {path} wrote {len(after) - len(before)} event(s)"
+    approval = client.get(f"/api/approvals/{asked['approval_id']}", headers=auth()).json()
+    assert approval["status"] == "PENDING", f"GET {path} decided an approval"
+    assert approval["actor_uid"] is None
 
 
 # -- F7-02 read tools -------------------------------------------------------
@@ -165,11 +247,13 @@ def test_an_unauthenticated_agent_gets_an_error_not_data(client: TestClient) -> 
     assert "name" not in response.text
 
 
-def test_an_agent_cannot_read_another_users_session(client: TestClient) -> None:
+@pytest.mark.parametrize("path", READ_TOOLS)
+def test_an_agent_cannot_read_another_users_session(client: TestClient, path: str) -> None:
+    """Driven by READ_TOOLS, so a new read route is covered the moment it is
+    classified — it was a hardcoded four-tuple that drifted from the router."""
     session_id = make_session(client, OWNER)
-    for path in ("status", "workflows", "plan", "validation"):
-        response = client.get(f"/api/agent/sessions/{session_id}/{path}", headers=auth(OTHER))
-        assert response.status_code == 404, path
+    response = client.get(f"/api/agent/sessions/{session_id}/{path}", headers=auth(OTHER))
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize(("path", "payload"), MUTATION_TOOLS + STAGE_TOOLS)

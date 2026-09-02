@@ -259,15 +259,21 @@ describe("tools do not advertise capability the code lacks", () => {
     }
   });
 
-  it("does not surround it with a forward promise", () => {
-    // A narrow screen, deliberately. A wider one flagged the honest phrase
-    // "Request analysis of…", which is how prose-policing regexes fail: they
-    // catch correct text and miss a fluent lie. The guarantee is the constant
-    // asserted above and the behavioural `started: false` pinned in both tiers;
-    // this only catches the most common contradiction, a "will do X" beside it.
+  it("does not surround it with a claim that it does the work", () => {
+    // Secondary screen. It cannot prove prose honest — the constant above and
+    // the `started: false` pass-through test are the real guarantees — but it
+    // catches a description that promises and denies in the same breath.
+    //
+    // Exact verb forms, no `\w*` wildcards: a wider pattern flagged the honest
+    // phrase "Request analysis of…" by matching "analys". That is how these
+    // regexes fail — catching correct text while missing a fluent lie — so the
+    // list is deliberately literal, and "run"/"generated" as ordinary words in
+    // an honest sentence must keep passing.
+    const CLAIMS_TO_ACT =
+      /\b(will|runs|executes|generates|deploys|analyses|analyzes|performs)\b/i;
     for (const tool of createTools(clientWith(() => ({})), SESSION)) {
       if (NOT_WIRED.includes(tool.name)) {
-        expect(tool.description, tool.name).not.toMatch(/\bwill\b/i);
+        expect(tool.description, tool.name).not.toMatch(CLAIMS_TO_ACT);
       }
     }
   });
