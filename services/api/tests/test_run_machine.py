@@ -44,8 +44,21 @@ def machine(store: InMemoryStore) -> RunMachine:
 
 
 async def make_session(store: InMemoryStore, state: RunState) -> Session:
+    """A session in its own new project."""
     project = await store.create_project(Project(owner_uid=OWNER, name="hotel"))
-    return await store.create_session(Session(project_id=project.id, owner_uid=OWNER, state=state))
+    return await make_session_in(store, project, state)
+
+
+async def make_session_in(store: InMemoryStore, project: Project, state: RunState) -> Session:
+    """A session in an existing project.
+
+    Needed because `make_session` creates a fresh project each time, which meant
+    a test intended to cover 'another session' was actually only covering
+    'another project' — and the project check alone would have passed it.
+    """
+    return await store.create_session(
+        Session(project_id=project.id, owner_uid=project.owner_uid, state=state)
+    )
 
 
 async def store_approval(
@@ -424,17 +437,22 @@ async def test_an_approval_that_was_never_stored_does_not_open_a_gate(
     assert (await store.get_session(session.id, OWNER)).state is RunState.TOOL_PLAN_APPROVAL_PENDING
 
 
-async def test_an_approval_from_another_session_does_not_open_this_gate(
+async def test_an_approval_from_another_session_of_the_same_project_is_refused(
     store: InMemoryStore, machine: RunMachine
 ) -> None:
-    """The artifact hash is content-derived, so two runs over the same
-    repository produce the same hash. Without a session check, an approval from
-    one run would silently open the gate in another.
-    """
-    victim = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
-    other = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    """Two runs over the same repository produce the same content-derived hash.
 
-    # Same gate, same hash, genuinely approved — but for a different session.
+    Same owner, same project, same gate, genuinely approved — and still refused,
+    because it belongs to a different session. An earlier version of this test
+    put the two sessions in different projects, so the project check passed it
+    and the session check was never exercised.
+    """
+    project = await store.create_project(Project(owner_uid=OWNER, name="hotel"))
+    victim = await make_session_in(store, project, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    other = await make_session_in(store, project, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    assert victim.project_id == other.project_id
+    assert victim.id != other.id
+
     foreign = await store_approval(store, other, ApprovalGate.TOOL_PLAN, PLAN_HASH)
 
     with pytest.raises(ApprovalRequiredError):
@@ -444,6 +462,33 @@ async def test_an_approval_from_another_session_does_not_open_this_gate(
             actor=OWNER,
             origin=Origin.HUMAN,
             cause="reused approval",
+            approval_id=foreign.id,
+            artifact_hash=PLAN_HASH,
+        )
+
+
+async def test_an_approval_from_another_project_is_refused(
+    store: InMemoryStore, machine: RunMachine
+) -> None:
+    """The other half of the binding, pinned separately so neither check can be
+    removed while the other covers for it."""
+    victim = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    other_project_session = await make_session(store, RunState.TOOL_PLAN_APPROVAL_PENDING)
+    assert victim.project_id != other_project_session.project_id
+
+    foreign = await store_approval(store, other_project_session, ApprovalGate.TOOL_PLAN, PLAN_HASH)
+    # Make the session ids match so only the project check can refuse it.
+    foreign = await store.update_approval(
+        foreign.model_copy(update={"session_id": victim.id}), OWNER
+    )
+
+    with pytest.raises(ApprovalRequiredError):
+        await machine.transition(
+            victim,
+            RunState.TOOL_PLAN_APPROVED,
+            actor=OWNER,
+            origin=Origin.HUMAN,
+            cause="cross-project approval",
             approval_id=foreign.id,
             artifact_hash=PLAN_HASH,
         )

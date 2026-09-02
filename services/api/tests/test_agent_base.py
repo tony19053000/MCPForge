@@ -168,3 +168,64 @@ def test_no_agent_overrides_the_run_loop_or_reaches_the_provider() -> None:
                 offenders.append(f"{path.name}:{node.lineno}: reaches for self._provider")
 
     assert not offenders, "an agent can bypass validation:\n" + "\n".join(offenders)
+
+
+# -- bounded model text -----------------------------------------------------
+
+
+def test_evidence_strings_are_bounded() -> None:
+    """Evidence values are quoted back in rejection messages, which reach the
+    activity timeline. Every other model-facing string is bounded; these were
+    not."""
+    from pydantic import ValidationError
+
+    from mcpforge.models.analysis import Evidence
+
+    Evidence(path="src/lib/rooms.ts", symbol="searchRooms", line=40)
+
+    with pytest.raises(ValidationError):
+        Evidence(path="x" * 401)
+    with pytest.raises(ValidationError):
+        Evidence(path="ok.ts", symbol="y" * 201)
+    with pytest.raises(ValidationError):
+        Evidence(path="ok.ts", line=0)
+
+
+class LongRejectionAgent(SimpleAgent):
+    """Rejects the first output with a very long message, then accepts.
+
+    An evidence failure quoting several unresolved paths produces exactly this
+    shape, and the message is model-derived text.
+    """
+
+    name = "verbose"
+
+    def __init__(self, provider: FakeGeminiProvider) -> None:
+        super().__init__(provider)
+        self._rejected = False
+
+    def verify(self, output: Thing, payload: Payload) -> None:
+        if not self._rejected:
+            self._rejected = True
+            raise AgentEvidenceError("x" * 5000)
+
+
+async def test_a_rejection_note_is_truncated_before_it_reaches_the_record() -> None:
+    """The log line beside it truncates; the note did not.
+
+    Drives the real run loop: reject once, succeed once, then inspect the record
+    the loop returned.
+    """
+    from mcpforge.agents.base import MAX_NOTE_LENGTH
+
+    agent = LongRejectionAgent(
+        FakeGeminiProvider([{"name": "a", "count": 1}, {"name": "b", "count": 2}])
+    )
+    output, record = await agent.run(Payload(), TRACE)
+
+    assert output.name == "b"
+    assert record.evidence_rejections == 1
+    assert record.notes, "the rejection should have been recorded"
+    assert len(record.notes[0]) == MAX_NOTE_LENGTH, (
+        f"note is {len(record.notes[0])} chars; model text reaches the timeline untruncated"
+    )

@@ -293,7 +293,8 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Purpose.** Understand the connected application's structure and find candidate workflows.
 **Files.** `services/api/src/mcpforge/agents/analyst.py`, `services/api/src/mcpforge/models/analysis.py`
 **Dependencies.** F4-01, F3-06
-**Implementation.** Produces `CodebaseAnalysis` — framework, routes, components, API handlers, services, business operations, forms, call-graph edges, candidate workflows — with evidence references into the index. Never touches the filesystem.
+**Implementation.** Produces `CodebaseAnalysis` — framework, summary, business operations, candidate workflows, unknowns — each claim carrying evidence references into the index. Never touches the filesystem.
+**Scope note.** The structural fields this ticket originally listed (routes, components, API handlers, services, call-graph edges) are produced deterministically by the indexer and passed *to* the agent as input rather than asked of it. Asking a model to restate facts the index already holds exactly adds a way to be wrong for no gain, and every restated fact would need verifying against the index anyway. Recorded here and in `02_ARCHITECTURE.md` §4.
 **Acceptance criteria.** On the demo app, detects the framework and identifies the known workflows; every claim carries an evidence reference that resolves against the index; unresolvable references are rejected deterministically rather than passed through.
 **Tests.** Integration test against the demo fixture; evidence-resolution test; test that a hallucinated file path fails validation.
 **Security.** Read-only by construction — the agent has no filesystem or network capability.

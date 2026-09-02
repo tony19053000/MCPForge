@@ -121,7 +121,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`b499b1e` — `docs: close Phase 3 at 40% after reviewer PASS`
+`e1976e1` — `docs: close Phase 3 at 40% after reviewer PASS`
 
 Phase 3 spans `20008e5` (F3-03/F3-04), `b93ab1a` (F3-01), `28da5ba` (F3-02/05/06/07), `d37fd5b` (F3-08) and `6856628` (review fixes). Earlier phases: Phase 2 `25555f7`..`c7937cd`, Phase 1 `f744be7`..`7754003`, Phase 0 `1430751`, `49e0162`.
 
