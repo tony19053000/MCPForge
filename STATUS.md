@@ -92,7 +92,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **833 passing** — 152 web (Vitest/RTL), 681 API (pytest). A further 15 run against live Firestore when opted in |
+| Unit | **861 passing** — 152 web (Vitest/RTL), 709 API (pytest). A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
@@ -131,9 +131,9 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`453e987` — `docs: close Phase 4 at 50% after reviewer PASS`
+`4f18dcf` — `feat(F6-01..F6-04): policy engine, PR writer, and failure handling`
 
-Phase 3 spans `20008e5` (F3-03/F3-04), `b93ab1a` (F3-01), `28da5ba` (F3-02/05/06/07), `d37fd5b` (F3-08) and `6856628` (review fixes). Earlier phases: Phase 2 `25555f7`..`c7937cd`, Phase 1 `f744be7`..`7754003`, Phase 0 `1430751`, `49e0162`.
+Phase 6 begins at `4f18dcf`. Phase 5 closed at `6d09ed7`, Phase 4 at `f8d1f9f`, Phase 3 at `e1976e1`, Phase 2 at `c7937cd`, Phase 1 at `7754003`, Phase 0 at `49e0162`. Every hash here is reachable from `main`.
 
 ---
 

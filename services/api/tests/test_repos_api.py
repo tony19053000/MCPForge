@@ -242,3 +242,65 @@ def test_the_supported_frameworks_endpoint_reports_the_registry(client: TestClie
 def test_the_frameworks_endpoint_is_public(client: TestClient) -> None:
     """It says what the product can do; there is nothing private about it."""
     assert client.get("/api/frameworks").status_code == 200
+
+
+# -- only one place may change access mode — F6-03 -------------------------
+
+
+def test_only_the_elevation_routes_mutate_access_mode(client: TestClient) -> None:
+    """03_SECURITY_ACCESS.md §5 — no implicit elevation anywhere.
+
+    Walks every route-handler function in `mcpforge.api` via the AST and asserts
+    that only the two elevation endpoints reference the functions that change
+    access mode. Hand-checking this does not survive the next route added.
+    """
+    import ast
+
+    from tests.structure import SRC
+
+    allowed = {"elevate_access", "revoke_access"}
+    mutators = {"elevate_to_write", "revoke_write"}
+
+    handlers: dict[str, set[str]] = {}
+    for path in (SRC / "mcpforge" / "api").glob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
+                continue
+            is_route = any(
+                isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Attribute)
+                and isinstance(d.func.value, ast.Name)
+                and d.func.value.id == "router"
+                for d in node.decorator_list
+            )
+            if not is_route:
+                continue
+            names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+            names |= {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
+            handlers[f"{path.name}:{node.name}"] = names
+
+    assert len(handlers) >= 10, f"only found {len(handlers)} route handlers; the walk is broken"
+
+    offenders = [
+        f"{key} references {sorted(names & mutators)}"
+        for key, names in handlers.items()
+        if (names & mutators) and key.split(":")[1] not in allowed
+    ]
+    assert not offenders, "a route outside the elevation endpoints changes access mode:\n" + (
+        "\n".join(offenders)
+    )
+
+    # And the two that are allowed genuinely do it, so the allowlist is not stale.
+    assert any(
+        key.endswith(":elevate_access") and "elevate_to_write" in names
+        for key, names in handlers.items()
+    )
+
+
+def test_the_elevation_routes_are_mounted(client: TestClient) -> None:
+    """So the test above cannot pass by there being no elevation route at all."""
+    paths = set(client.app.openapi()["paths"])  # type: ignore[attr-defined]
+    assert "/api/projects/{project_id}/access/elevate" in paths
+    assert "/api/projects/{project_id}/access/revoke" in paths
+    assert len(paths) > 8, f"only {len(paths)} paths in the schema"

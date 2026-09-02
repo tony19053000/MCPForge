@@ -232,3 +232,49 @@ def test_critical_and_high_findings_block() -> None:
     assert Severity.HIGH.blocks is True
     assert Severity.MEDIUM.blocks is False
     assert Severity.LOW.blocks is False
+
+
+# -- findings name file, line and rule — F6-01 acceptance ------------------
+
+
+def test_a_secret_finding_names_the_line_it_was_found_on() -> None:
+    leaked = "AKIA" + "IOSFODNN7EXAMPLE"
+    contents = f"// header\n// second line\nconst key = '{leaked}';\n"
+    findings = evaluate_policy(plan_with(), patch_with(file(contents=contents)))
+
+    secret = next(f for f in findings if f.rule == "secret-in-generated-content")
+    assert secret.evidence is not None
+    assert secret.evidence.line == 3
+    assert ":3" in secret.summary
+    assert secret.evidence.path.endswith("cancelReservation.ts")
+
+
+def test_two_credentials_produce_two_findings_with_their_own_lines() -> None:
+    a = "AKIA" + "IOSFODNN7EXAMPLE"
+    b = "gh" + "p_" + "a" * 36
+    findings = evaluate_policy(
+        plan_with(), patch_with(file(contents=f"const x = '{a}';\nconst y = '{b}';\n"))
+    )
+    secrets = [f for f in findings if f.rule == "secret-in-generated-content"]
+    lines = [f.evidence.line for f in secrets if f.evidence and f.evidence.line]
+    assert sorted(lines) == [1, 2]
+
+
+def test_a_plan_finding_carries_the_line_from_its_evidence() -> None:
+    """Built through the model, not model_copy'd with a dict.
+
+    `model_copy` does not validate, so a dict stays a dict and the assertion
+    below would fail for a reason that is not about the policy engine.
+    """
+    base = plan_with(approval_required=False).tools[0].model_dump(mode="json")
+    base["evidence"] = [
+        {"path": "src/lib/reservations.ts", "symbol": "cancelReservation", "line": 65}
+    ]
+    with_line = ToolPlan.model_validate({"tools": [base], "notes": []})
+
+    finding = next(
+        f for f in evaluate_policy(with_line) if f.rule == "approval-required-for-state-change"
+    )
+    assert finding.evidence is not None
+    assert finding.evidence.line == 65
+    assert finding.evidence.symbol == "cancelReservation"

@@ -20,13 +20,12 @@ from mcpforge.github.boundary import (
     bind_repository,
     elevate_to_write,
 )
+from mcpforge.github.branches import BRANCH_PREFIX, branch_name_for
 from mcpforge.github.client import InstallationToken
 from mcpforge.github.writer import (
-    BRANCH_PREFIX,
     BranchAndPullRequestWriter,
     BranchExistsError,
     WriteRefusedError,
-    branch_name_for,
 )
 from mcpforge.models.core import (
     Approval,
@@ -38,6 +37,7 @@ from mcpforge.models.core import (
 )
 from mcpforge.models.toolplan import ToolPlan
 from mcpforge.models.webmcp import WebMCPToolset
+from mcpforge.orchestration.recovery import WriteStage
 from tests.structure import SRC, code_lines
 from tests.test_generation import destructive_tool, read_tool
 
@@ -137,6 +137,7 @@ def check(project: Project, patch: Any, plan: ToolPlan, **over: Any) -> None:
         "session_id": SESSION,
         "default_branch": "main",
         "branch": branch_name_for("booking"),
+        "base_commit": "basesha",
     }
     kwargs.update(over)
     BranchAndPullRequestWriter.assert_writable(**kwargs)
@@ -164,7 +165,7 @@ def test_the_branch_name_is_namespaced(project: Project) -> None:
 def test_writing_to_a_bare_branch_name_is_refused(
     project: Project, patch: Any, plan: ToolPlan, branch: str
 ) -> None:
-    with pytest.raises(WriteRefusedError, match="only writes to"):
+    with pytest.raises(WriteRefusedError, match="writes only to branches of the form"):
         check(project, patch, plan, branch=branch)
 
 
@@ -172,8 +173,18 @@ def test_writing_to_a_bare_branch_name_is_refused(
 def test_a_protected_name_under_our_prefix_is_still_refused(
     project: Project, patch: Any, plan: ToolPlan, name: str
 ) -> None:
-    with pytest.raises(WriteRefusedError, match="protected name"):
+    # The shape check refuses these first — `mcpforge/main` is not
+    # `mcpforge/webmcp-<slug>` — and the protected-name check stands behind it.
+    with pytest.raises(WriteRefusedError):
         check(project, patch, plan, branch=f"{BRANCH_PREFIX}{name}")
+    with pytest.raises(WriteRefusedError, match="protected name"):
+        check(
+            project,
+            patch,
+            plan,
+            branch=f"{BRANCH_PREFIX}webmcp-{name}",
+            default_branch=f"{BRANCH_PREFIX}webmcp-{name}",
+        )
 
 
 def test_writing_to_the_repositorys_actual_default_branch_is_refused(
@@ -193,6 +204,40 @@ def test_a_default_branch_inside_our_namespace_stops_everything(
         check(project, patch, plan, default_branch="mcpforge/main")
 
 
+@pytest.mark.parametrize(
+    "branch",
+    [
+        "mcpforge/../../../other",
+        "mcpforge/webmcp-a/../../../other",
+        "mcpforge/webmcp-a%2f..%2f..",
+        "mcpforge/webmcp- space",
+        "mcpforge/webmcp-a\nb",
+        "mcpforge/webmcp-a\tb",
+        "mcpforge/webmcp-UPPER",
+        "mcpforge/webmcp-",
+        "mcpforge/webmcp-" + "a" * 100,
+        "MCPFORGE/webmcp-a",
+    ],
+)
+def test_a_branch_name_that_is_not_exactly_our_shape_is_refused(
+    project: Project, patch: Any, plan: ToolPlan, branch: str
+) -> None:
+    """A prefix check is not enough.
+
+    httpx collapses dot segments, so `mcpforge/../../../other` would pass a
+    prefix test and silently retarget the existence probe at an unrelated
+    endpoint — which 404s, and would be read as "the branch does not exist".
+    """
+    with pytest.raises(WriteRefusedError, match="writes only to branches of the form"):
+        check(project, patch, plan, branch=branch)
+
+
+def test_httpx_really_does_collapse_dot_segments() -> None:
+    """The reason the shape check exists, asserted rather than assumed."""
+    url = httpx.URL("https://api.github.test/repos/o/r/git/ref/heads/mcpforge/../../../other")
+    assert "mcpforge" not in str(url)
+
+
 def test_there_is_no_force_push_or_history_rewrite_anywhere() -> None:
     """§6 — never force push, never rewrite history. Asserted structurally."""
     import re
@@ -205,7 +250,7 @@ def test_there_is_no_force_push_or_history_rewrite_anywhere() -> None:
         r"|force\s*=\s*True"  # a force keyword argument
         r"|--force"  # a git flag
         r"|filter-branch|rebase"  # history rewriting
-        r'|["\'](?:PATCH|PUT|DELETE)["\']'  # HTTP methods that move or remove a ref
+        r'|["\'](?:PATCH|PUT)["\']'  # HTTP methods that would MOVE a ref
     )
     offenders = [
         f"{writer.name}:{lineno}: {code}"
@@ -213,14 +258,29 @@ def test_there_is_no_force_push_or_history_rewrite_anywhere() -> None:
         if mechanisms.search(code)
     ]
     assert not offenders, "force/rewrite mechanism in the writer:\n" + "\n".join(offenders)
+    # DELETE is covered separately: it exists once, for cleanup, behind
+    # may_delete_branch. See test_the_writer_creates_refs_and_never_updates_one.
 
 
-def test_the_writer_never_deletes_or_updates_a_ref() -> None:
-    """create-ref fails if the branch exists and cannot move an existing one."""
+def test_the_writer_creates_refs_and_never_updates_one() -> None:
+    """create-ref fails if the branch exists and cannot move an existing one.
+
+    A DELETE does exist, for cleanup — but it is reachable only through
+    `_try_cleanup`, which requires `may_delete_branch`.
+    """
     source = (SRC / "mcpforge" / "github" / "writer.py").read_text()
-    assert '"POST",\n            f"/repos/{repo}/git/refs"' in source
-    assert "DELETE" not in source
-    assert "git/refs/heads" not in source.replace("git/ref/heads", "")
+    assert '"POST",\n                f"/repos/{repo}/git/refs"' in source
+
+    deletes = [
+        (lineno, code)
+        for lineno, code in code_lines(SRC / "mcpforge" / "github" / "writer.py")
+        if '"DELETE"' in code
+    ]
+    assert len(deletes) == 1, f"more than one delete path: {deletes}"
+
+    cleanup = source[source.index("async def _try_cleanup") :]
+    assert "may_delete_branch(" in cleanup
+    assert cleanup.index("may_delete_branch(") < cleanup.index('"DELETE"')
 
 
 # -- access mode and boundary ----------------------------------------------
@@ -399,8 +459,6 @@ async def test_an_existing_branch_is_never_overwritten(
             patch_approval=approval(ApprovalGate.PATCH, patch),
             pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
             session_id=SESSION,
-            title="t",
-            body="b",
         )
 
 
@@ -418,6 +476,8 @@ async def test_a_pull_request_targets_the_default_branch_from_our_branch(
 
         if path.endswith("/git/ref/heads/mcpforge/webmcp-booking"):
             return httpx.Response(404, json={"message": "Not Found"})
+        if path.endswith("/git/commits/basesha"):
+            return httpx.Response(200, json={"tree": {"sha": "basetreesha"}})
         if path.endswith("/git/blobs"):
             return httpx.Response(201, json={"sha": "blobsha"})
         if path.endswith("/git/trees"):
@@ -446,18 +506,21 @@ async def test_a_pull_request_targets_the_default_branch_from_our_branch(
         patch_approval=approval(ApprovalGate.PATCH, patch),
         pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
         session_id=SESSION,
-        title="Add WebMCP tools",
-        body="body",
     )
 
-    assert result.number == 7
+    assert result.succeeded is True
     assert result.branch == "mcpforge/webmcp-booking"
+    assert result.pull_request is not None
+    assert result.pull_request.number == 7  # type: ignore[attr-defined]
 
     # The ref created is ours, and the commit's parent is the approved base.
     ref_call = next(b for m, p, b in calls if p.endswith("/git/refs"))
     assert ref_call["ref"] == "refs/heads/mcpforge/webmcp-booking"
     commit_call = next(b for m, p, b in calls if p.endswith("/git/commits"))
     assert commit_call["parents"] == ["basesha"]
+    # The tree is built on the base commit's TREE, not on the commit sha.
+    tree_call = next(b for m, p, b in calls if p.endswith("/git/trees"))
+    assert tree_call["base_tree"] == "basetreesha"
 
     # The pull request comes *from* our branch *into* the default branch.
     pr_call = next(b for m, p, b in calls if p.endswith("/pulls"))
@@ -495,7 +558,254 @@ async def test_no_write_happens_when_a_precondition_fails(
             patch_approval=approval(ApprovalGate.PATCH, patch),
             pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
             session_id=SESSION,
-            title="t",
-            body="b",
         )
     assert calls == [], f"the writer called GitHub before refusing: {calls}"
+
+
+# -- injected failure at each step — F6-04 ---------------------------------
+#
+# The earlier recovery tests handed the stage in, so nothing verified that a
+# real failure at the commit step produces COMMIT_CREATED. These drive the
+# writer with a transport that fails at one step at a time.
+
+
+def _transport(fail_at: str | None) -> tuple[httpx.MockTransport, list[tuple[str, str]]]:
+    """A GitHub that works until `fail_at`, then returns 500."""
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append((request.method, path))
+
+        def maybe(step: str, response: httpx.Response) -> httpx.Response:
+            failing = fail_at == step or (fail_at == "cleanup" and step == "pull")
+            return httpx.Response(500, json={"message": "boom"}) if failing else response
+
+        if "/git/ref/heads/" in path:
+            return httpx.Response(404, json={"message": "Not Found"})
+        if path.endswith("/git/commits/basesha"):
+            return maybe("base", httpx.Response(200, json={"tree": {"sha": "treesha"}}))
+        if path.endswith("/git/blobs"):
+            return maybe("blob", httpx.Response(201, json={"sha": "blobsha"}))
+        if path.endswith("/git/trees"):
+            return maybe("tree", httpx.Response(201, json={"sha": "newtree"}))
+        if path.endswith("/git/commits"):
+            return maybe("commit", httpx.Response(201, json={"sha": "newcommit"}))
+        if path.endswith("/git/refs"):
+            return maybe("ref", httpx.Response(201, json={"ref": "refs/heads/x"}))
+        if path.endswith("/pulls"):
+            return maybe("pull", httpx.Response(201, json={"number": 9, "html_url": "u"}))
+        if request.method == "DELETE":
+            # `cleanup` means the pull request failed AND the delete failed.
+            return httpx.Response(500) if fail_at == "cleanup" else httpx.Response(204)
+        raise AssertionError(f"unexpected: {request.method} {path}")
+
+    return httpx.MockTransport(handler), calls
+
+
+async def _run(
+    project: Project,
+    patch: Any,
+    plan: ToolPlan,
+    token: InstallationToken,
+    fail_at: str | None,
+) -> tuple[Any, list[tuple[str, str]]]:
+    transport, calls = _transport(fail_at)
+    writer = BranchAndPullRequestWriter(
+        token=token,
+        http=httpx.AsyncClient(transport=transport),
+        base_url="https://api.github.test",
+    )
+    outcome = await writer.create_pull_request(
+        project=project,
+        repository_full_name=REPO,
+        default_branch="main",
+        base_commit="basesha",
+        branch=branch_name_for("booking"),
+        patch=patch,
+        plan=plan,
+        patch_approval=approval(ApprovalGate.PATCH, patch),
+        pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
+        session_id=SESSION,
+    )
+    return outcome, calls
+
+
+@pytest.mark.parametrize("fail_at", ["base", "blob", "tree", "commit"])
+async def test_a_failure_before_the_branch_exists_leaves_nothing_behind(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken, fail_at: str
+) -> None:
+    outcome, calls = await _run(project, patch, plan, token, fail_at)
+
+    assert outcome.succeeded is False
+    assert outcome.stage is WriteStage.NOTHING_DONE
+    assert outcome.cleanup_performed is False
+    assert "500" in (outcome.error or "")
+    assert "Nothing was written" in outcome.explain()
+    # No ref was created, so there is nothing to delete.
+    assert not any(m == "DELETE" for m, _ in calls)
+
+
+async def test_a_failure_creating_the_ref_reports_an_orphaned_commit(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    """The commit exists but no branch points at it, so nothing the developer
+    sees has changed."""
+    outcome, calls = await _run(project, patch, plan, token, "ref")
+
+    assert outcome.stage is WriteStage.COMMIT_CREATED
+    assert "no branch points at it" in outcome.explain()
+    assert not any(m == "DELETE" for m, _ in calls)
+
+
+async def test_a_failure_opening_the_pull_request_cleans_up_our_branch(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    """This is the case recovery.py exists for: a branch we created, and no
+    pull request pointing at it."""
+    outcome, calls = await _run(project, patch, plan, token, "pull")
+
+    assert outcome.stage is WriteStage.BRANCH_CREATED
+    assert outcome.cleanup_performed is True
+    assert "was removed" in outcome.explain()
+
+    deletes = [p for m, p in calls if m == "DELETE"]
+    assert deletes == ["/repos/tony19053000/mcpforge-test/git/refs/heads/mcpforge/webmcp-booking"]
+
+
+async def test_a_failed_cleanup_is_reported_honestly(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    """If we could not remove the branch, say so and name it, rather than
+    claiming a tidy state."""
+    outcome, _ = await _run(project, patch, plan, token, "cleanup")
+
+    assert outcome.stage is WriteStage.BRANCH_CREATED
+    assert outcome.cleanup_performed is False
+    assert "still there" in outcome.explain()
+    assert "mcpforge/webmcp-booking" in outcome.explain()
+
+
+async def test_the_happy_path_reports_success_and_deletes_nothing(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    outcome, calls = await _run(project, patch, plan, token, None)
+
+    assert outcome.succeeded is True
+    assert outcome.stage is WriteStage.PULL_REQUEST_OPENED
+    assert outcome.pull_request is not None
+    assert not any(m == "DELETE" for m, _ in calls)
+
+
+# -- the pull request describes what it contains — F6-02 -------------------
+
+
+async def test_the_pull_request_body_is_built_from_the_plan_and_patch(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as jsonlib
+
+        path = request.url.path
+        if "/git/ref/heads/" in path:
+            return httpx.Response(404, json={})
+        if path.endswith("/git/commits/basesha"):
+            return httpx.Response(200, json={"tree": {"sha": "t"}})
+        if path.endswith("/pulls"):
+            bodies.append(jsonlib.loads(request.content))
+            return httpx.Response(201, json={"number": 1, "html_url": "u"})
+        return httpx.Response(201, json={"sha": "s", "ref": "r"})
+
+    writer = BranchAndPullRequestWriter(
+        token=token,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        base_url="https://api.github.test",
+    )
+    await writer.create_pull_request(
+        project=project,
+        repository_full_name=REPO,
+        default_branch="main",
+        base_commit="basesha",
+        branch=branch_name_for("booking"),
+        patch=patch,
+        plan=plan,
+        patch_approval=approval(ApprovalGate.PATCH, patch),
+        pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
+        session_id=SESSION,
+    )
+
+    body = bodies[0]["body"]
+    # Every tool, its risk, and the function it calls.
+    assert "`search_rooms`" in body and "`cancel_reservation`" in body
+    assert "`searchRooms()`" in body and "`cancelReservation()`" in body
+    assert "DESTRUCTIVE" in body
+    # The files, with their reasons.
+    assert "src/webmcp/tools/cancelReservation.ts" in body
+    # What stops for the developer.
+    assert "What stops for you" in body
+    assert "an AI agent cannot complete them without a person deciding" in body
+    # No claim about validation that did not run.
+    assert "## Validation" not in body
+
+
+async def test_a_credential_in_the_pull_request_body_blocks_the_write(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    """§4.4 — outbound content is scanned again before the pull request. The
+    body is outbound content, and it is built from model-authored descriptions.
+    """
+    leaked = "AKIA" + "IOSFODNN7EXAMPLE"
+    tainted = plan.model_copy(
+        update={
+            "tools": [
+                plan.tools[0].model_copy(update={"description": f"Use {leaked} to search"}),
+                plan.tools[1],
+            ]
+        }
+    )
+    transport, calls = _transport(None)
+    writer = BranchAndPullRequestWriter(
+        token=token,
+        http=httpx.AsyncClient(transport=transport),
+        base_url="https://api.github.test",
+    )
+    with pytest.raises(WriteRefusedError, match="credential-shaped"):
+        await writer.create_pull_request(
+            project=project,
+            repository_full_name=REPO,
+            default_branch="main",
+            base_commit="basesha",
+            branch=branch_name_for("booking"),
+            patch=patch,
+            plan=tainted,
+            patch_approval=approval(ApprovalGate.PATCH, patch),
+            pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
+            session_id=SESSION,
+        )
+    assert calls == [], "the writer contacted GitHub before scanning the body"
+
+
+# -- the base commit is bound to the approval — F6-02 ----------------------
+
+
+def test_writing_onto_a_different_base_than_the_one_reviewed_is_refused(
+    project: Project, patch: Any, plan: ToolPlan
+) -> None:
+    """The same files on a different base is a different change."""
+    with pytest.raises(WriteRefusedError, match="base moved after approval"):
+        check(project, patch, plan, base_commit="a-different-sha")
+
+
+def test_a_patch_with_no_recorded_base_is_refused(project: Project, plan: ToolPlan) -> None:
+    baseless = generate_patch(WebMCPToolset(tools=[read_tool(), destructive_tool()]))
+    assert baseless.base_commit is None
+    with pytest.raises(WriteRefusedError, match="records no base commit"):
+        check(
+            project,
+            baseless,
+            plan,
+            patch_approval=approval(ApprovalGate.PATCH, baseless),
+            pr_approval=approval(ApprovalGate.PULL_REQUEST, baseless),
+        )

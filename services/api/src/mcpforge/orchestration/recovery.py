@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from mcpforge.github.writer import BRANCH_PREFIX
+from mcpforge.github.branches import BRANCH_PREFIX
 from mcpforge.logging import get_logger
 
 log = get_logger(__name__)
@@ -37,6 +37,9 @@ class WriteOutcome:
     branch: str | None
     error: str | None = None
     cleanup_performed: bool = False
+    #: Set only on success. Typed as object so this module does not depend on
+    #: the writer, which depends on it.
+    pull_request: object | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -84,6 +87,7 @@ def outcome_for(
     branch: str | None,
     error: Exception | str | None = None,
     cleanup_performed: bool = False,
+    pull_request: object | None = None,
 ) -> WriteOutcome:
     message = str(error) if error is not None else None
     if message:
@@ -94,5 +98,9 @@ def outcome_for(
             cleanup_performed=cleanup_performed,
         )
     return WriteOutcome(
-        stage=stage, branch=branch, error=message, cleanup_performed=cleanup_performed
+        stage=stage,
+        branch=branch,
+        error=message,
+        cleanup_performed=cleanup_performed,
+        pull_request=pull_request,
     )

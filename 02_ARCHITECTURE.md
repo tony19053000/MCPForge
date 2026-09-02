@@ -65,12 +65,12 @@ MCPForge/
 │       │   ├── auth/           TokenVerifier port + provisional Firebase adapter
 │       │   ├── api/            HTTP routers (thin; no business logic)
 │       │   ├── agents/         the six runtime agents
-│       │   ├── orchestration/  machine.py — the enforcement point for §6
+│       │   ├── orchestration/  machine.py (§6 enforcement), recovery.py (write failures)
 │       │   ├── gemini/         provider abstraction over google-genai
 │       │   ├── indexing/       repository index pipeline
-│       │   ├── security/       secret filter, path policy, prompt-context redaction
+│       │   ├── security/      filters, path policy, deterministic policy engine
 │       │   ├── generation/     patch generation + framework adapters
-│       │   ├── github/         GitHub App client, branch + PR writer
+│       │   ├── github/        App client, boundary, branches, PR writer
 │       │   ├── execution/      SecureExecutionProvider implementations
 │       │   ├── store/          persistence ports + adapters
 │       │   └── models/        Pydantic schemas (source of truth)
@@ -259,7 +259,7 @@ Rules:
 
 Because the approval carries the artifact hash, a regenerated patch invalidates a prior approval automatically.
 
-Enforcement lives in `orchestration/machine.py`. `RunMachine.transition` is the only way a session changes state: it checks the table, checks the gate where one applies, persists the transition with actor, origin and cause, and emits a `state.changed` event. `record_failure_loop` bounds regeneration and halts loudly on exhaustion.
+│       │   ├── orchestration/  machine.py (§6 enforcement), recovery.py (write failures)
 
 ## 7. Activity events
 

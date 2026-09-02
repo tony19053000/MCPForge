@@ -402,7 +402,8 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 
 ### F6-03 — Access mode elevation flow
 **Purpose.** Make widening repository access a deliberate, auditable human act.
-**Files.** `services/api/src/mcpforge/api/access.py`, `apps/web/src/components/repo/elevation/**`
+**Files.** `services/api/src/mcpforge/api/repos.py`, `services/api/src/mcpforge/github/boundary.py`
+**Scope note.** The elevation **UI** moved to `F7-05` alongside the repository selector, during the Phase 6 review. Both belong in the same context panel, and building one without the other would mean guessing at that layout twice. The API and the boundary — the security-relevant half — are complete and tested here, including a test that enumerates every route handler and asserts only the two elevation endpoints touch access mode. The endpoints live in `api/repos.py` rather than a separate `access.py`, since they operate on the same bound-repository state.
 **Dependencies.** F3-02
 **Implementation.** UI and API for `READ_ONLY` → `WRITE_PR`, showing what will be written and where; explicit user action; persisted record of actor, reason and time; reversible.
 **Acceptance criteria.** No implicit elevation exists anywhere; elevation is reversible; the record is auditable; no endpoint other than this one can change access mode.
@@ -468,7 +469,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Purpose.** Let a developer choose which of their installation-scoped repositories a project is bound to, from the workspace.
 **Files.** `apps/web/src/components/repo/**`, `apps/web/src/components/workspace/workspace-view.tsx`
 **Dependencies.** F3-02, F1-05
-**Implementation.** Context-panel view listing repositories from `GET /api/github/repositories`, a branch selector, and the bind action. Shows the access mode and, when elevated, who elevated it and when. Elevation is offered only with the reason shown, per `03_SECURITY_ACCESS.md` §5.
+**Implementation.** Context-panel view listing repositories from `GET /api/github/repositories`, a branch selector, and the bind action. Shows the access mode and, when elevated, who elevated it and when. Also carries the **elevation and revocation controls** moved here from `F6-03`: elevation is offered only with the reason shown, per `03_SECURITY_ACCESS.md` §5, and is reversible.
 **Acceptance criteria.** Only installation-scoped repositories are offered; a bound project shows its repository and cannot be silently repointed; access mode is visible at all times; a demo project shows that it has no repository and cannot be elevated.
 **Tests.** RTL tests for the list, the bound state, the read-only badge, the elevation flow including the reason text, and the demo-project case.
 **Security.** The UI never decides access. It calls the routes, and the boundary in `github/boundary.py` is what enforces the rules.

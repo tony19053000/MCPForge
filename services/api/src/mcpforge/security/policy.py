@@ -53,11 +53,12 @@ Rule = Callable[[PolicyContext], list[Finding]]
 
 
 def _evidence_for(tool: ToolPlanEntry) -> Evidence | None:
-    return (
-        Evidence(path=tool.evidence[0].path, symbol=tool.maps_to_function)
-        if tool.evidence
-        else None
-    )
+    """Carry the line through. F6-01 requires a finding to name file, line and
+    rule, and the line was being discarded here."""
+    if not tool.evidence:
+        return None
+    first = tool.evidence[0]
+    return Evidence(path=first.path, symbol=tool.maps_to_function, line=first.line)
 
 
 # ---------------------------------------------------------------------------
@@ -158,27 +159,26 @@ def rule_tool_names_are_unique(context: PolicyContext) -> list[Finding]:
 
 
 def rule_no_secrets_in_generated_content(context: PolicyContext) -> list[Finding]:
-    """§4.4. Scanned before review and again before a pull request."""
+    """§4.4. Scanned before review and again before a pull request.
+
+    One finding per hit, each carrying its line: F6-01 requires a violation to
+    name file, line and rule, and this is the finding where the line matters
+    most to whoever has to remove it.
+    """
     if context.patch is None:
         return []
-    findings: list[Finding] = []
-    for change in context.patch.files:
-        hits = scan_content(change.contents)
-        if hits:
-            rules = sorted({h.rule for h in hits})
-            findings.append(
-                Finding(
-                    rule="secret-in-generated-content",
-                    severity=Severity.CRITICAL,
-                    summary=(
-                        f"{change.path} contains credential-shaped content: {', '.join(rules)}."
-                    ),
-                    recommendation="Remove it. A credential must never reach a pull request.",
-                    evidence=Evidence(path=change.path),
-                    deterministic=True,
-                )
-            )
-    return findings
+    return [
+        Finding(
+            rule="secret-in-generated-content",
+            severity=Severity.CRITICAL,
+            summary=(f"{change.path}:{hit.line} contains credential-shaped content: {hit.rule}."),
+            recommendation="Remove it. A credential must never reach a pull request.",
+            evidence=Evidence(path=change.path, line=hit.line),
+            deterministic=True,
+        )
+        for change in context.patch.files
+        for hit in scan_content(change.contents)
+    ]
 
 
 def rule_no_sensitive_paths(context: PolicyContext) -> list[Finding]:

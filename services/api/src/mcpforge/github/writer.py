@@ -20,13 +20,18 @@ branch is out of reach.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 import httpx
 
 from mcpforge.github.boundary import assert_may_write, assert_within_boundary
+from mcpforge.github.branches import (
+    BRANCH_PREFIX,
+    BRANCH_SHAPE,
+    PROTECTED_NAMES,
+)
 from mcpforge.github.client import ACCEPT, GitHubError, InstallationToken
+from mcpforge.github.pr_description import default_title, describe_patch
 from mcpforge.logging import get_logger
 from mcpforge.models.core import (
     Approval,
@@ -36,17 +41,16 @@ from mcpforge.models.core import (
 )
 from mcpforge.models.patch import GeneratedPatch
 from mcpforge.models.toolplan import ToolPlan
+from mcpforge.orchestration.recovery import (
+    WriteOutcome,
+    WriteStage,
+    may_delete_branch,
+    outcome_for,
+)
+from mcpforge.security.filters import scan_content
 from mcpforge.security.policy import evaluate_policy
 
 log = get_logger(__name__)
-
-#: Every branch MCPForge creates lives here. Enforced, not conventional.
-BRANCH_PREFIX = "mcpforge/"
-
-#: Branch names we refuse outright even under the prefix, as a second guard.
-PROTECTED_NAMES = frozenset({"main", "master", "develop", "trunk", "release", "production"})
-
-_SLUG = re.compile(r"[^a-z0-9-]+")
 
 
 class WriteRefusedError(Exception):
@@ -55,12 +59,6 @@ class WriteRefusedError(Exception):
 
 class BranchExistsError(WriteRefusedError):
     """The branch is already there. We create; we never overwrite."""
-
-
-def branch_name_for(slug: str) -> str:
-    """`mcpforge/webmcp-<slug>`, per §6."""
-    cleaned = _SLUG.sub("-", slug.lower()).strip("-") or "integration"
-    return f"{BRANCH_PREFIX}webmcp-{cleaned[:60]}"
 
 
 @dataclass(frozen=True)
@@ -98,6 +96,7 @@ class BranchAndPullRequestWriter:
         session_id: str,
         default_branch: str,
         branch: str,
+        base_commit: str,
     ) -> None:
         """Everything that must hold before a single byte is written.
 
@@ -108,11 +107,13 @@ class BranchAndPullRequestWriter:
         assert_within_boundary(project, repository_full_name)
         assert_may_write(project)
 
-        # 2. The branch is ours, and is not a protected name.
-        if not branch.startswith(BRANCH_PREFIX):
+        # 2. The branch is exactly the shape we generate. A prefix check is not
+        #    enough: httpx collapses dot segments, so `mcpforge/../../../other`
+        #    would pass one and silently retarget the request.
+        if not BRANCH_SHAPE.match(branch):
             raise WriteRefusedError(
-                f"Refusing to write to {branch!r}: MCPForge only writes to "
-                f"{BRANCH_PREFIX}* branches."
+                f"Refusing to write to {branch!r}: MCPForge writes only to branches of "
+                f"the form {BRANCH_PREFIX}webmcp-<slug>."
             )
         tail = branch[len(BRANCH_PREFIX) :]
         if tail.lower() in PROTECTED_NAMES or branch == default_branch:
@@ -124,7 +125,22 @@ class BranchAndPullRequestWriter:
                 "the namespace MCPForge writes to. Refusing rather than risking it."
             )
 
-        # 3. Both approvals exist, belong to this session, and cover this patch.
+        # 3. The base being written to is the base the human reviewed against.
+        #    `hashable()` includes base_commit, so an approval covers a patch on
+        #    a specific base; committing the same files onto a different base
+        #    would otherwise pass every other check.
+        if patch.base_commit is None:
+            raise WriteRefusedError(
+                "The patch records no base commit, so an approval cannot bind the base "
+                "it was reviewed against."
+            )
+        if base_commit != patch.base_commit:
+            raise WriteRefusedError(
+                f"The patch was reviewed against {patch.base_commit}, but the write "
+                f"targets {base_commit}. The base moved after approval."
+            )
+
+        # 4. Both approvals exist, belong to this session, and cover this patch.
         expected = artifact_hash(patch.hashable())
         for approval, gate in (
             (patch_approval, ApprovalGate.PATCH),
@@ -142,7 +158,7 @@ class BranchAndPullRequestWriter:
                     "not approved, or the patch changed after approval."
                 )
 
-        # 4. The policy engine still passes on the exact patch being written.
+        # 5. The policy engine still passes on the exact patch being written.
         blocking = [f for f in evaluate_policy(plan, patch) if f.severity.blocks]
         if blocking:
             rules = ", ".join(sorted({f.rule for f in blocking}))
@@ -188,10 +204,18 @@ class BranchAndPullRequestWriter:
         patch_approval: Approval | None,
         pr_approval: Approval | None,
         session_id: str,
-        title: str,
-        body: str,
-    ) -> PullRequest:
-        """Create the branch, commit the patch, open the pull request."""
+        title: str | None = None,
+        body: str | None = None,
+    ) -> WriteOutcome:
+        """Create the branch, commit the patch, open the pull request.
+
+        Returns a `WriteOutcome` rather than raising on a partial failure: the
+        developer needs to know *how far it got*, because "nothing happened" and
+        "a branch exists but no pull request" call for different actions.
+
+        A precondition failure still raises, because nothing has been written
+        and there is no state to explain.
+        """
         self.assert_writable(
             project=project,
             repository_full_name=repository_full_name,
@@ -202,7 +226,21 @@ class BranchAndPullRequestWriter:
             session_id=session_id,
             default_branch=default_branch,
             branch=branch,
+            base_commit=base_commit,
         )
+
+        # The description is built from the plan and patch, not accepted from a
+        # caller, and scanned before it leaves — §4.4 requires the outbound scan
+        # again before pull-request creation, and the body is outbound content.
+        pr_title = title or default_title(plan)
+        pr_body = body or describe_patch(plan, patch, branch=branch, base_commit=base_commit)
+        for label, text in (("title", pr_title), ("body", pr_body)):
+            hits = scan_content(text)
+            if hits:
+                raise WriteRefusedError(
+                    f"The pull request {label} contains credential-shaped content: "
+                    f"{', '.join(sorted({h.rule for h in hits}))}."
+                )
 
         if await self.branch_exists(repository_full_name, branch):
             raise BranchExistsError(
@@ -211,56 +249,98 @@ class BranchAndPullRequestWriter:
             )
 
         repo = repository_full_name
+        stage = WriteStage.NOTHING_DONE
+        branch_is_ours = False
 
-        # Blobs, then a tree on top of the base commit's tree, then a commit.
-        tree_entries = []
-        for change in patch.files:
-            blob = await self._request(
+        try:
+            # The tree we build on must be a tree SHA, not a commit SHA.
+            commit_object = await self._request("GET", f"/repos/{repo}/git/commits/{base_commit}")
+            base_tree = commit_object.json()["tree"]["sha"]
+
+            tree_entries = []
+            for change in patch.files:
+                blob = await self._request(
+                    "POST",
+                    f"/repos/{repo}/git/blobs",
+                    json={"content": change.contents, "encoding": "utf-8"},
+                )
+                tree_entries.append(
+                    {
+                        "path": change.path,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": blob.json()["sha"],
+                    }
+                )
+
+            tree = await self._request(
                 "POST",
-                f"/repos/{repo}/git/blobs",
-                json={"content": change.contents, "encoding": "utf-8"},
+                f"/repos/{repo}/git/trees",
+                json={"base_tree": base_tree, "tree": tree_entries},
             )
-            tree_entries.append(
-                {
-                    "path": change.path,
-                    "mode": "100644",
-                    "type": "blob",
-                    "sha": blob.json()["sha"],
-                }
+            commit = await self._request(
+                "POST",
+                f"/repos/{repo}/git/commits",
+                json={
+                    "message": pr_title,
+                    "tree": tree.json()["sha"],
+                    "parents": [base_commit],
+                },
             )
+            stage = WriteStage.COMMIT_CREATED
 
-        tree = await self._request(
-            "POST",
-            f"/repos/{repo}/git/trees",
-            json={"base_tree": base_commit, "tree": tree_entries},
-        )
-        commit = await self._request(
-            "POST",
-            f"/repos/{repo}/git/commits",
-            json={
-                "message": title,
-                "tree": tree.json()["sha"],
-                "parents": [base_commit],
-            },
-        )
+            # create-ref, not update-ref: it fails if the branch exists and
+            # cannot move an existing one. There is no force flag in this module.
+            await self._request(
+                "POST",
+                f"/repos/{repo}/git/refs",
+                json={"ref": f"refs/heads/{branch}", "sha": commit.json()["sha"]},
+            )
+            stage = WriteStage.BRANCH_CREATED
+            branch_is_ours = True
+            log.info("github.branch_created", repository=repo, branch=branch)
 
-        # create-ref, not update-ref: it fails if the branch exists and cannot
-        # move an existing one. There is no force flag anywhere in this module.
-        await self._request(
-            "POST",
-            f"/repos/{repo}/git/refs",
-            json={"ref": f"refs/heads/{branch}", "sha": commit.json()["sha"]},
-        )
-        log.info("github.branch_created", repository=repo, branch=branch)
+            pull = await self._request(
+                "POST",
+                f"/repos/{repo}/pulls",
+                json={
+                    "title": pr_title,
+                    "body": pr_body,
+                    "head": branch,
+                    "base": default_branch,
+                },
+            )
+        except GitHubError as exc:
+            cleaned = False
+            if stage is WriteStage.BRANCH_CREATED:
+                cleaned = await self._try_cleanup(repo, branch, created_by_this_run=branch_is_ours)
+            return outcome_for(stage, branch=branch, error=exc, cleanup_performed=cleaned)
 
-        pull = await self._request(
-            "POST",
-            f"/repos/{repo}/pulls",
-            json={"title": title, "body": body, "head": branch, "base": default_branch},
-        )
         data = pull.json()
         log.info("github.pull_request_opened", repository=repo, number=data["number"])
-        return PullRequest(number=data["number"], url=data["html_url"], branch=branch)
+        return outcome_for(
+            WriteStage.PULL_REQUEST_OPENED,
+            branch=branch,
+            pull_request=PullRequest(number=data["number"], url=data["html_url"], branch=branch),
+        )
+
+    async def _try_cleanup(self, repo: str, branch: str, *, created_by_this_run: bool) -> bool:
+        """Remove a branch we created, if cleanup is permitted.
+
+        `may_delete_branch` requires both that the branch is in our namespace and
+        that this run created it. A developer may have their own `mcpforge/`
+        branch, and matching a pattern is not permission to delete it.
+        """
+        if not may_delete_branch(branch, created_by_this_run=created_by_this_run):
+            return False
+        response = await self._http.request(
+            "DELETE",
+            f"{self._base}/repos/{repo}/git/refs/heads/{branch}",
+            headers={"Authorization": f"Bearer {self._token.token}", "Accept": ACCEPT},
+        )
+        removed = response.status_code in (204, 200)
+        log.info("github.cleanup", repository=repo, branch=branch, removed=removed)
+        return removed
 
     async def aclose(self) -> None:
         await self._http.aclose()
