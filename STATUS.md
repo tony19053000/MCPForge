@@ -6,15 +6,15 @@
 
 ## Overall completion
 
-**50%** — Phase 4 complete, verified by `[REVIEWER / TESTER]` on round 3. Halfway.
+**60%** — Phase 5 complete, verified by `[REVIEWER / TESTER]` on round 3.
 
 ## Current phase
 
-**Phase 5 — WebMCP Transformation Engine (50% → 60%)** — implemented, in review.
+**Phase 6 — Security, Patch and PR Pipeline (60% → 70%)** — not yet started.
 
 ## Current ticket
 
-`F5-01`..`F5-04` — `IN_REVIEW`
+`F6-01` — Deterministic policy engine — `PENDING`
 
 ---
 
@@ -52,19 +52,18 @@
 | F4-03 | Workflow Architect | PASS (round 3) |
 | F4-04 | Security Reviewer and Human Interaction | PASS (round 3) |
 | F4-05 | Orchestrator and state machine | PASS (round 3) |
+| F5-01 | WebMCP tool contract model | PASS (round 3) |
+| F5-02 | WebMCP Generator | PASS (round 3) — output compiles in the real demo app |
+| F5-03 | Patch representation and diff | PASS (round 3) |
+| F5-04 | Framework adapter interface | PASS (round 3) |
 
 ## In progress
 
-| Ticket | Title | Status |
-|---|---|---|
-| F5-01 | WebMCP tool contract model | `IN_REVIEW` |
-| F5-02 | WebMCP Generator | `IN_REVIEW` — generated code typechecks inside the real demo app |
-| F5-03 | Patch representation and diff | `IN_REVIEW` |
-| F5-04 | Framework adapter interface | `IN_REVIEW` |
+None.
 
 ## Pending
 
-Phases 5–9, tickets `F5-01` through `F9-05`, including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
+Phases 6–9, tickets `F6-01` through `F9-05`, including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -486,3 +485,78 @@ disables the property it protects.
 
 **Next intended task.** `F5-01` — the WebMCP tool contract model, then Agent 3,
 the generator that writes the actual integration code.
+
+### 0008 — Phase 5: the WebMCP transformation engine
+
+**What was built.** The centre of the product: an approved tool plan becomes
+TypeScript that runs in a browser and calls the developer's own functions.
+
+- `models/webmcp.py` — the validated tool contract.
+- `models/patch.py` — a patch as data, never a filesystem effect.
+- `generation/nextjs.py` — the emitter.
+- `generation/escaping.py` — the single boundary where model text becomes code.
+- `generation/test_template.py` — a test the developer inherits per tool.
+- `generation/adapters/` — Next.js, and an honest refusal for everything else.
+- `apps/web/src/components/diff/` — the diff view.
+
+**760 tests** — 152 web, 608 API. The generated integration compiles inside the
+real demo app, and the generated tests pass there on first run.
+
+**Decisions worth keeping.**
+
+1. **Agent 3 is not a model call.** The judgement was spent earlier: agent 2
+   chose the tools and their mappings, and a human approved. Emitting code from
+   a validated contract is mechanical, and a template cannot hallucinate an
+   import or reimplement logic. It is also deterministic, so regenerating does
+   not invalidate an approval for no reason.
+2. **Every model-authored string crosses `generation/escaping.py`.** This is the
+   whole of the injection defence, and it is one file so it cannot be
+   half-applied.
+3. **Handlers take raw input and narrow it.** Runtime guards produce typed
+   locals, so the call site needs no cast and `register.ts` has none. An earlier
+   version used `as never`, which defeated the only remaining defence.
+4. **A gated tool never calls through.** It requests approval and returns the
+   pending id, and its generated test fails loudly if that changes.
+5. **Generated output is scanned for credentials before it is emitted.**
+
+**Review record — three rounds.**
+
+Round 1, ten defects, one of them the most serious thing found in this project
+so far: **model-authored titles and descriptions were interpolated raw into
+generated TypeScript.** A description ending `*/` closed the JSDoc block and
+everything after it became top-level code that compiled cleanly and ran on
+module load in the customer's application. Those strings come from an agent
+reading a repository we do not control, so a prompt-injected source file was a
+path to arbitrary code in someone else's repo.
+
+Round 1 also found: no generated tests, no diff viewer, no secret scan of
+generated output, no capability test, `as never` casting away input validation,
+an abort-signal contract pinned only by a substring that prose satisfied, and a
+landing page claiming three frameworks when one adapter existed.
+
+Round 2, three defects. My first injection *test* stripped comments before
+strings, so a `*/` inside a schema string threw off the matching and swallowed
+the very code it was looking for — **it passed on a live injection.** Strings
+are stripped first now.
+
+Round 3, PASS. 22 mutations, none surviving. The reviewer applied the patch into
+a fixture copy, ran the generated tests, then mutated the generated handlers and
+confirmed the generated tests catch both properties they claim to protect.
+
+**Three real bugs were found by compiling the output rather than reading it:** a
+handler shadowing the function it imported (infinite recursion), a call built in
+the wrong argument shape, and a mis-capitalised type name. None were visible on
+inspection. `scripts/generate_check.py` exists because of that.
+
+**A note on process.** Three times this phase I reported an edit as made without
+re-reading the file, and each time a string replace had silently missed. I now
+edit by line number where a match is fragile, and read the line back.
+
+**What NOT to change accidentally.** `generation/escaping.py` and the rule that
+nothing interpolates model text directly. The strings-before-comments order in
+`code_outside_comments_and_strings`. `scan_generated` running before the patch is
+returned. The absence of `approval_required` from `ProposedTool`.
+
+**Next intended task.** `F6-01` — the deterministic policy engine, then the
+branch-and-pull-request writer, which is the first code that can change someone
+else's repository.

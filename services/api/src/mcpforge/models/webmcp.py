@@ -124,11 +124,6 @@ class SourceBinding(BaseModel):
             raise ValueError(
                 f"{v!r} is not a safe import specifier; generated files use the @/ alias"
             )
-        if v.lower() in GENERATED_IDENTIFIERS:
-            raise ValueError(
-                f"{v!r} collides with an identifier the generator declares; "
-                "the generated file would not compile"
-            )
         return v
 
     @field_validator("symbol")
