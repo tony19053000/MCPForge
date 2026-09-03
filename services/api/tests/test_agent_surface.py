@@ -13,11 +13,8 @@ import pathlib
 from collections.abc import Iterator
 
 import pytest
-from fastapi import APIRouter, WebSocket
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from mcpforge.api import agent as agent_module
 from mcpforge.auth.identity import AuthError, VerifiedIdentity
 from mcpforge.config import Settings
 from mcpforge.gemini.fake import FakeGeminiProvider
@@ -25,7 +22,7 @@ from mcpforge.main import create_app
 from mcpforge.models.core import Artifact, ArtifactKind, artifact_hash
 from mcpforge.models.patch import ChangeKind, FileChange, GeneratedPatch
 from mcpforge.store.memory import InMemoryStore
-from tests.structure import SRC
+from tests.structure import SRC, python_files
 
 OWNER = "uid-owner"
 OTHER = "uid-stranger"
@@ -119,196 +116,80 @@ def seed_prerequisites(client: TestClient, session_id: str) -> None:
 #: this phase's claim. Reads are therefore enumerated and constrained too.
 READ_TOOLS: list[str] = ["status", "workflows", "plan", "validation"]
 
+
 #: The agent router speaks only these two verbs. Restricting the vocabulary is
 #: what lets the sweeps below be keyed on path: a PATCH added to a path a POST
-#: already covers would otherwise be "swept" while the verb was not.
-ALLOWED_METHODS = frozenset({"get", "post"})
+def test_only_one_function_may_change_an_approvals_status() -> None:
+    """The security property, stated once and route-independently.
 
+    Seven review rounds were spent trying to prove "no route can approve
+    anything" by enumerating routes. Each enumerator had a different blind spot
+    — a nested include, a WebSocket, a second router, a mounted sub-app — and
+    each fix traded away what the previous one caught. Enumeration is the wrong
+    shape for this: there is no bounded list of ways to add a route.
 
-class UnexpectedRouteError(AssertionError):
-    """A leaf on the agent router that this file does not know how to classify."""
-
-
-def routes_of(router: APIRouter) -> list[tuple[str, str]]:
-    """Every (method, path) in a router tree, including nested includes.
-
-    Walked from the router object, not from `app.routes` filtered by path
-    prefix. Two rounds were lost to that filter: FastAPI stores a nested
-    `include_router`'s children with their **unprefixed** path, so
-    `startswith("/api/agent")` discarded them and a POST added through one extra
-    `include_router` line was in no bucket while 55 tests stayed green.
-
-    Unknown leaf types raise rather than being skipped. An `APIWebSocketRoute`
-    has a path, no HTTP verb and no `.routes`, so a skip-what-you-do-not-
-    recognise walker dropped it silently — and a WebSocket endpoint that
-    approved its own gates passed every sweep in this file.
+    This is the property those sweeps were reaching for. If `decide_approval` is
+    the only code that can move an approval off PENDING, then no endpoint can
+    approve anything regardless of how it is mounted, what verb it uses, or
+    whether it appears in the OpenAPI schema. A new route cannot evade it,
+    because it does not look at routes at all.
     """
-    found: list[tuple[str, str]] = []
-    for route in router.routes:
-        nested = getattr(route, "original_router", None)
-        if nested is not None:
-            found.extend(routes_of(nested))
-            continue
-        if isinstance(route, APIRouter):
-            found.extend(routes_of(route))
-            continue
-        if not isinstance(route, APIRoute):
-            raise UnexpectedRouteError(
-                f"{type(route).__name__} at {getattr(route, 'path', '?')} is on the agent "
-                "router. Every agent-reachable route must be an APIRoute this file can "
-                "classify — a WebSocket or Mount is an unswept path around every gate."
-            )
-        found.extend(
-            (method.lower(), _suffix(route.path))
-            for method in route.methods or set()
-            if method.upper() not in {"HEAD", "OPTIONS"}
-        )
-    return found
+    offenders: list[str] = []
+    for path in python_files():
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            # `approval.status = ...` anywhere but the one function allowed to.
+            targets = node.targets if isinstance(node, ast.Assign) else []
+            if isinstance(node, ast.AugAssign):
+                targets = [node.target]
+            for target in targets:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr in {"status", "actor_uid", "decided_at"}
+                    and isinstance(target.value, ast.Name)
+                    and "approval" in target.value.id.lower()
+                ):
+                    offenders.append(f"{path.relative_to(SRC)}:{target.lineno}")
 
-
-def _suffix(path: str) -> str:
-    """The part that identifies the endpoint, however it was mounted.
-
-    Top-level routes carry the router's `/api/agent` prefix; children of a
-    nested include do not. Both normalise to the same key.
-    """
-    return path.removeprefix("/api/agent").removeprefix("/sessions/{session_id}/")
-
-
-def served_agent_routes(client: TestClient) -> set[tuple[str, str]]:
-    """Every (method, suffix) the **app** actually serves under `/api/agent`.
-
-    Read from each mounted router's effective route contexts, whose `.path` is
-    the served path — so a route reaches this set however it was mounted, and
-    `include_in_schema=False` cannot hide it the way it hid from `openapi()`.
-
-    This exists because rooting the enumeration at `agent_module.router` alone
-    traded away coverage the previous app-level walk had: a second router with
-    its own `/api/agent` prefix, included in `main.py`, served a self-approving
-    POST that the router walk could not see and 773 tests stayed green.
-    """
-    found: set[tuple[str, str]] = set()
-    for route in client.app.routes:  # type: ignore[attr-defined]
-        contexts = route.effective_candidates() if hasattr(route, "effective_candidates") else []
-        for context in contexts:
-            path = getattr(context, "path", "")
-            if not path.startswith("/api/agent"):
-                continue
-            methods = getattr(context, "methods", None)
-            if not methods:
-                raise UnexpectedRouteError(
-                    f"a route with no HTTP method is served at {path}. A WebSocket or "
-                    "Mount under /api/agent is an unswept path around every gate."
-                )
-            found.update(
-                (method.lower(), _suffix(path))
-                for method in methods
-                if method.upper() not in {"HEAD", "OPTIONS"}
-            )
-    return found
-
-
-def agent_routes(client: TestClient) -> list[tuple[str, str]]:
-    """The agent surface.
-
-    Two independent readings, required to agree:
-
-    - `routes_of(agent_module.router)` walks the router that defines the surface,
-      which is what catches a route added through a nested `include_router`
-      (its children are stored unprefixed, so a path filter misses them).
-    - `served_agent_routes(client)` reads what the app actually serves, which is
-      what catches a route reaching `/api/agent` from a different router.
-
-    Each reading has been wrong on its own, in different ways, one round apart.
-    Requiring both to agree is what makes a route hard to hide: it must be
-    absent from the defining router *and* absent from the served app.
-    """
-    declared = set(routes_of(agent_module.router))
-    served = served_agent_routes(client)
-
-    assert declared == served, (
-        "the agent surface disagrees with what the app serves.\n"
-        f"served but not on agent.router: {sorted(served - declared)}\n"
-        f"on agent.router but not served: {sorted(declared - served)}"
+    allowed = {"mcpforge/api/approvals.py"}
+    unexpected = [o for o in offenders if o.rsplit(":", 1)[0] not in allowed]
+    assert not unexpected, (
+        "an approval's decision fields are written outside api/approvals.py: "
+        + ", ".join(sorted(unexpected))
+        + ". Only decide_approval may record a human decision."
     )
-    return sorted(declared)
+    assert offenders, "the check found no writes at all — it is scanning nothing"
 
 
-def test_the_route_enumeration_actually_finds_the_router(client: TestClient) -> None:
-    """A guard on the guards.
+def test_the_agent_module_never_writes_an_approval_decision() -> None:
+    """The same property, aimed at the module an agent can actually reach.
 
-    Every sweep in this file is built on `agent_routes`. If it returns nothing —
-    as it did when it scanned only the top level of `app.routes` — every one of
-    them passes while checking nothing.
+    Narrower and blunter than the sweep above, and it holds no matter what
+    routes `api/agent.py` grows: if the module cannot name a decision field or
+    an approval-updating call, nothing it serves can decide anything.
     """
-    found = agent_routes(client)
-    assert len(found) >= 12, f"agent_routes found only {len(found)} routes: {found}"
-    assert ("post", "pull-request") in found
-    assert ("get", "status") in found
+    source = (SRC / "mcpforge" / "api" / "agent.py").read_text()
+    tree = ast.parse(source)
 
-
-def test_the_route_enumeration_sees_a_nested_include() -> None:
-    """A POST added through one extra `include_router` line was in no bucket
-    while the whole suite stayed green, because the child's stored path has no
-    `/api/agent` prefix to match on."""
-    outer, inner = APIRouter(prefix="/api/agent"), APIRouter()
-
-    @inner.post("/sessions/{session_id}/deploy")
-    async def deploy(session_id: str) -> dict[str, str]:
-        return {}
-
-    outer.include_router(inner)
-    assert ("post", "deploy") in routes_of(outer)
-
-
-def test_the_route_enumeration_refuses_a_route_it_cannot_classify() -> None:
-    """A WebSocket has a path, no HTTP verb and no `.routes`. Skipping it left
-    an agent-only path around every gate invisible to every sweep here."""
-    router = APIRouter(prefix="/api/agent")
-
-    @router.websocket("/sessions/{session_id}/stream")
-    async def stream(websocket: WebSocket, session_id: str) -> None:
-        await websocket.close()
-
-    with pytest.raises(UnexpectedRouteError, match="WebSocket"):
-        routes_of(router)
-
-
-def test_the_agent_router_speaks_only_get_and_post(client: TestClient) -> None:
-    offenders = [
-        f"{method.upper()} {path}"
-        for method, path in agent_routes(client)
-        if method not in ALLOWED_METHODS
+    banned_calls = {"update_approval", "decide_approval"}
+    called = [
+        f"agent.py:{node.lineno}: {node.func.attr}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in banned_calls
     ]
-    assert not offenders, (
-        "the agent router must use only GET and POST, so the path-keyed sweeps are "
-        "complete. Found: " + ", ".join(offenders)
-    )
+    assert not called, "the agent module can decide an approval: " + ", ".join(called)
 
-
-def test_every_agent_route_is_classified(client: TestClient) -> None:
-    """No route of any verb reaches the agent surface unclassified.
-
-    Both axes, from what is mounted rather than from what is documented. Adding
-    a route means putting it in a bucket, and each bucket has tests attached:
-    MUTATION_TOOLS must open a gate, STAGE_TOOLS must not, READ_TOOLS must
-    neither write nor decide.
-    """
-    prefix = "/api/agent/sessions/{session_id}/"
-    classified = {("post", p) for p, _ in MUTATION_TOOLS + STAGE_TOOLS} | {
-        ("get", p) for p in READ_TOOLS
-    }
-
-    unclassified = {
-        (method, path.removeprefix(prefix)) for method, path in agent_routes(client)
-    } - classified
-
-    assert not unclassified, (
-        "agent routes in no bucket: "
-        + ", ".join(f"{m.upper()} {p}" for m, p in sorted(unclassified))
-        + ". Add each to MUTATION_TOOLS (opens a gate), STAGE_TOOLS (records only) "
-        "or READ_TOOLS (reads only)."
-    )
+    assigned = [
+        f"agent.py:{target.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Attribute)
+        and target.attr in {"status", "actor_uid", "decided_at"}
+    ]
+    assert not assigned, "the agent module writes a decision field: " + ", ".join(assigned)
 
 
 @pytest.mark.parametrize("path", READ_TOOLS)
