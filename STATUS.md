@@ -138,7 +138,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 ## Latest Git commit
 
-`d9497c4` — `docs: close Phase 6 at 70% after reviewer PASS`
+`fd9209b` — `feat(F7): close Phase 7 at 80% after reviewer PASS on round 10`
 
 **Correction.** This line previously read `41dad3c`. That is a real commit object — `docs: close Phase 6 at 70% after reviewer PASS` — but it was superseded when that commit was amended into `d9497c4`, leaving it unreachable from `main` (`git merge-base --is-ancestor 41dad3c main` fails). STATUS recorded the pre-amend hash.
 
