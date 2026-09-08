@@ -24,10 +24,53 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - run: npm ci
       - run: npm run typecheck --workspace=apps/web
       - run: npm run lint --workspace=apps/web
-      - run: npm run test --workspace=apps/web
+
+      - name: Start the API for the cross-tier check
+        # tests/live-e2e.test.ts is the only test where a WebMCP tool call
+        # reaches the real server over real HTTP. It skips when nothing is
+        # listening, and for one review round CI never started anything — so it
+        # was green by skip, permanently, and could not have gone red.
+        #
+        # Starting the server here plus MCPFORGE_LIVE_REQUIRED=1 below is what
+        # makes it a check. A server that fails to start fails this step; it
+        # does not fall through to a skip.
+        run: |
+          uv sync --frozen --directory services/api
+          nohup uv run --frozen --directory services/api python scripts/live_api.py \
+            > /tmp/live_api.log 2>&1 &
+          echo $! > /tmp/live_api.pid
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8099/healthz > /dev/null; then
+              echo "Live API is up on 127.0.0.1:8099 (development token verifier)."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::The live API did not come up within 60s"
+          cat /tmp/live_api.log || true
+          exit 1
+
+      - name: Web tests, including the live cross-tier check
+        env:
+          MCPFORGE_LIVE_REQUIRED: "1"
+        run: npm run test --workspace=apps/web
+
+      - name: Stop the live API
+        if: always()
+        run: |
+          if [ -f /tmp/live_api.pid ]; then
+            kill "$(cat /tmp/live_api.pid)" 2>/dev/null || true
+            rm -f /tmp/live_api.pid
+          fi
+          echo "--- live API log ---"
+          cat /tmp/live_api.log 2>/dev/null || true
+
       - run: npm run build --workspace=apps/web
       - name: Client bundle carries no server credential
         # Must run in the SAME job as the web build. It was once moved into a

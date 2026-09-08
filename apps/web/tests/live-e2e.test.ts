@@ -16,19 +16,26 @@ import { registerMCPForgeTools } from "@/webmcp/register";
  * browser sense — that is Playwright, deferred to F9-03 — but it is the first
  * check where a tool invocation crosses the tier boundary.
  *
- * It skips rather than fails when no server is listening, so it does not turn
- * CI red for an unrelated reason. To run it:
+ * Locally it skips when no server is listening, so a developer running the unit
+ * suite does not get a red bar for a server they did not start:
  *
  *     uv run --directory services/api python scripts/live_api.py   # port 8099
  *     npm run test --workspace=apps/web
+ *
+ * A check that can only skip is a check that can never go red, so CI does not
+ * get that option. The web CI job starts `services/api/scripts/live_api.py`,
+ * waits for `/healthz`, and sets MCPFORGE_LIVE_REQUIRED=1 — which turns "no
+ * server" from a skip into a failure. If the server dies, fails to start, or
+ * the tools stop reaching it, this suite goes red rather than quietly green.
  */
 const API = process.env.MCPFORGE_LIVE_API ?? "http://127.0.0.1:8099";
+const REQUIRED = process.env.MCPFORGE_LIVE_REQUIRED === "1";
 const client = new ApiClient(async () => "uid-alice", API);
 
 async function serverIsUp(): Promise<boolean> {
   try {
     const response = await fetch(`${API}/healthz`, {
-      signal: AbortSignal.timeout(500),
+      signal: AbortSignal.timeout(2000),
     });
     return response.ok;
   } catch {
@@ -36,7 +43,20 @@ async function serverIsUp(): Promise<boolean> {
   }
 }
 
-const live = (await serverIsUp()) ? describe : describe.skip;
+const up = await serverIsUp();
+
+if (!up && REQUIRED) {
+  describe("agent drives MCPForge for real", () => {
+    it("has a live API to drive", () => {
+      expect.fail(
+        `MCPFORGE_LIVE_REQUIRED=1, but nothing is listening at ${API}. ` +
+          "Start services/api/scripts/live_api.py. This check is not allowed to skip here.",
+      );
+    });
+  });
+}
+
+const live = up ? describe : describe.skip;
 
 live("agent drives MCPForge for real", () => {
   it("registers tools and drives the gate end to end", async () => {

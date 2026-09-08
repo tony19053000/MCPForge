@@ -14,10 +14,20 @@ Three properties make that true, and each is tested:
 
 1. **No decide route here.** Deciding an approval lives in `api/approvals.py`
    and stamps `Origin.HUMAN` from a verified token. There is no agent-reachable
-   path to it, and no second implementation of it.
+   path to it, and no second implementation of it. That is held by an AST sweep
+   over every backend module rather than by enumerating this router's routes:
+   only `api/approvals.py` may assign a decision field, copy one on with
+   `model_copy(update=...)`, or call `create_approval` / `update_approval` /
+   `decide_approval`. So a second router that simply *called* the real decision
+   handler is caught too. The sweep is name-based and does not defeat deliberate
+   indirection; what holds regardless of spelling is property 2's behavioural
+   check against the stored record.
 2. **Mutations stop at the gate.** Every mutation endpoint records an artifact,
    opens an approval request against it, and returns `awaiting_human_approval`.
-   None of them transitions the session into a gated state.
+   None of them transitions the session — the state is what the orchestrator
+   reads, so moving it would be the gate opening with no decision. That is
+   asserted behaviourally, by driving every endpoint here and comparing the
+   stored session state before and after, not by reading this file's imports.
 3. **Hashes are derived, not accepted.** The hash an approval binds to comes
    from the stored artifact's content. A caller cannot present one artifact and
    claim an approval bound to a different hash.

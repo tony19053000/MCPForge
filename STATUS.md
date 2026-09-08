@@ -6,15 +6,17 @@
 
 ## Overall completion
 
-**70%** — Phase 6 complete, verified by `[REVIEWER / TESTER]` on round 3.
+**80%** — Phase 7 complete, verified by `[REVIEWER / TESTER]` on round 10.
 
 ## Current phase
 
-**Phase 7 — MCPForge Self-WebMCP (70% → 80%)** — implemented. **Rounds 1–6 all returned `FAIL`** (10, 4, 3, 3, 2 and 1 findings). Round 7 could not run — the reviewer hit the account session limit. The route-enumeration approach that produced findings in rounds 4, 5 and 6 has been removed at the project owner's direction and replaced with a route-independent property test; re-review pending. The percentage stays at 70% until `[REVIEWER / TESTER]` returns `PASS`.
+**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — not started. `F8-02` is `BLOCKED` on blocker B-04 (no GCP Confidential Space infrastructure) and will not be simulated. `F8-01`, `F8-03`, `F8-04` and `F8-05` can proceed.
+
+Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2 and 1 findings); the route-enumeration approach that produced rounds 4–6 was removed at the project owner's direction and replaced with a route-independent property test. Rounds 7, 8 and 9 then returned `FAIL` with 6, 2 and 2 findings — every one of them found by mutating the source and observing that the suite stayed green, and three of them being gaps that a previous round's *fix* had introduced. Round 10 returned `PASS`.
 
 ## Current ticket
 
-All five Phase 7 tickets are implemented and in review. F7-02 and F7-03 are `DONE, PARTIALLY BLOCKED` — see `05_FEATURE_TICKETS.md`; the blocked half is orchestrator wiring, moved into `F9-01`.
+None. Next intended task is `F8-01` — the attestation evidence model.
 
 ---
 
@@ -60,6 +62,11 @@ All five Phase 7 tickets are implemented and in review. F7-02 and F7-03 are `DON
 | F6-02 | Branch and PR writer | PASS (round 3) |
 | F6-03 | Access mode elevation flow | PASS (round 3) |
 | F6-04 | Rollback and failure handling | PASS (round 3) |
+| F7-01 | WebMCP adapter | PASS (round 10) |
+| F7-02 | MCPForge read tools | PASS (round 10) — `DONE, PARTIALLY BLOCKED`, see `F9-01` |
+| F7-03 | MCPForge gated mutation tools | PASS (round 10) — `DONE, PARTIALLY BLOCKED`, see `F9-01` |
+| F7-04 | Agent-origin activity labelling | PASS (round 10) |
+| F7-05 | Repository selector UI | PASS (round 10) |
 
 ## In progress
 
@@ -67,7 +74,7 @@ None.
 
 ## Pending
 
-Phases 7–9, tickets `F7-01` through `F9-05`, plus `F6-05` (GitHub webhook, needs a public URL), including `F6-05` (GitHub webhook) and `F7-05` (repository selector UI), both moved out of Phase 3 with scope notes. See `05_FEATURE_TICKETS.md`.
+Phases 8–9, tickets `F8-01` through `F9-05`, plus `F6-05` (GitHub webhook, needs a public URL). See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -91,9 +98,10 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **996 passing** — 222 web (Vitest/RTL), 774 API (pytest), 1 skipped. A further 15 run against live Firestore when opted in |
+| Unit | **1005 passing** — 222 web (Vitest/RTL), 783 API (pytest), 3 skipped (2 web, 1 API). The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
+| Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
 | E2E | Not started. Playwright is introduced at `F9-03`; there is deliberately no failing `test:e2e` script in the meantime |
 | Build | `npm run build` clean (web only — Python has no build step) |
 | Lint | `eslint` clean; `ruff check` and `ruff format --check` clean |
@@ -109,7 +117,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Client bundle | Contains the Firebase Web config (`NEXT_PUBLIC_FIREBASE_*`) and `NEXT_PUBLIC_AUTH_PROVIDERS` — public browser identifiers by design, required for sign-in. Verified free of the Gemini key, any model SDK, and any service-account or private-key material. Enforced by a CI step that scans the built bundle |
 | Auth enforcement | Server-side on every authenticated route; RS256 pinned; `alg:none`, expired, wrong-issuer, wrong-audience and forged tokens all rejected by test |
 | Model tool invocation | SDK automatic function calling explicitly disabled, asserted by test |
-| Model output as authorization | Impossible by construction. Gates load an `Approval` from the store by id, check it belongs to this session and project, and check its hash still matches. The interaction agent has no field in which to express an approval |
+| Model output as authorization | Gates load an `Approval` from the store by id, check it belongs to this session and project, and check its hash still matches. The interaction agent has no field in which to express an approval. Two independent checks, and the guarantee is their conjunction. (1) Route-independent AST sweep over every backend module: only `api/approvals.py` may assign a decision field, copy one on via `model_copy(update=...)`, or call `create_approval` / `update_approval` / `decide_approval`. It matches on names, so it catches straightforwardly-written paths — a second router, a refactor, a generated route — and is not claimed to defeat deliberate indirection such as `getattr`; no name-based check can. (2) Behavioural gate tests that read the **stored record** after driving every agent endpoint, and so hold however a write was spelled: the approval stays `PENDING`, the gate stays shut, and no agent endpoint transitions the session |
 | Risk classification | Re-derived from the mapped function by the policy engine itself, not read from the model's field. The stricter of the two verdicts wins |
 | Generated code | Every model-authored string passes through `generation/escaping.py` before becoming part of a file. Generated output is scanned for credentials before it is emitted. Generated tools validate declared types at runtime, not only presence |
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
@@ -136,7 +144,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 A first attempt at this correction claimed the hash was invented. That was wrong: `git log --oneline --all | grep` does not find an orphaned commit, because `--all` walks refs and an amended-away commit is on none. `git log -1 <hash>` and `git cat-file -e <hash>` do find it. Verify a hash's *reachability*, not its existence. Every other hash below was re-checked with `git merge-base --is-ancestor` on 2026-09-03 and is reachable from `main`.
 
-Phase 7 work so far spans `f45f2e5`, `f1925ae` and `a034fce`, plus the round fixes `6b01d41`, `d82c56f`, `658d6ff`, `24028cf`, `5d92d9f`, `b0a9dd2` and the enumerator replacement. None of it is verified yet.
+Phase 7 spans `f45f2e5`, `f1925ae` and `a034fce`, plus the round fixes `6b01d41`, `d82c56f`, `658d6ff`, `24028cf`, `5d92d9f`, `b0a9dd2`, the enumerator replacement `8dd7d5a`, the live cross-tier check `d377346`, and the round-7-to-10 fixes committed at close. All of it is verified as of round 10. The closing commit hash is recorded in the line above once written; it is not back-filled by amending, per the correction recorded in this section.
 
 Phase 6 spans `4f18dcf`, `e06dd54` and `1346a88`. Phase 5 closed at `6d09ed7`, Phase 4 at `f8d1f9f`, Phase 3 at `e1976e1`, Phase 2 at `c7937cd`, Phase 1 at `7754003`, Phase 0 at `49e0162`. Every hash here is reachable from `main`.
 
@@ -646,3 +654,85 @@ stays `PENDING`. The writer has no HTTP caller yet; it gets one with `F7-03`'s
 
 **Next intended task.** `F7-01` — the WebMCP adapter, and then MCPForge's own
 tools, which is what makes it agent-accessible.
+
+### 0010 — Phase 7: MCPForge drives itself, and still cannot approve
+
+**What was built.** MCPForge's own WebMCP surface — the phase that makes the
+product's central claim testable rather than merely stated.
+
+- `apps/web/src/webmcp/adapter.ts` — the one file that knows the API shape.
+- `apps/web/src/webmcp/register.ts`, `use-webmcp.ts`, `tools/index.ts` — twelve
+  tools, registered on mount, torn down by `AbortSignal`.
+- `services/api/src/mcpforge/api/agent.py` — every route an agent tool can
+  reach, and the only place `Origin.AGENT` is established.
+- `apps/web/tests/live-e2e.test.ts` — the first executed test in which the two
+  tiers actually meet.
+
+**1005 tests** — 222 web, 783 API, 3 skipped.
+
+**Ten review rounds.** Rounds 1–6 `FAIL` (10, 4, 3, 3, 2, 1). Rounds 7–9 `FAIL`
+(6, 2, 2). Round 10 `PASS`. The three late rounds are the ones worth reading,
+because every finding in them was found the same way: **mutate the source, run
+the suite, watch it stay green.** Reading the tests would have found none of them.
+
+1. **Round 7.** A second `APIRouter(prefix="/api/agent")` used
+   `model_copy(update={"status": APPROVED})` + `store.update_approval(...)`. The
+   whole suite stayed green and the gate opened with no human decision. The
+   property test matched only attribute assignment.
+2. **Round 8.** With that closed, a second router simply *called the project's
+   own* `decide_approval(...)`. No obfuscation at all. Suite green, agent
+   self-approved, and the timeline recorded `HUMAN:approval.decided` — breaking
+   F7-03 and F7-04 at once. `decide_approval` was banned in one file and
+   permitted everywhere else.
+3. **Round 9.** The round-8 origin fix excluded a *parameter* shadowing a module
+   constant but not a *local reassignment* of it. `ORIGIN = Origin(payload[...])`
+   inside a handler labelled an agent action `HUMAN`, suite green.
+
+Three of those were gaps introduced by the previous round's fix. That is the
+same shape as round 6 and it is the reason this phase took ten rounds.
+
+**Decisions worth keeping.**
+
+1. **Route enumeration was the wrong shape and is not coming back.** It was
+   removed at the project owner's direction. Enumerating routes asks "have I
+   listed every door?", which is a question that silently goes stale. The
+   replacement asks "can a decision be written at all?" over every backend
+   module. Do not reintroduce enumeration to fix a future finding here.
+2. **The origin check is an allowlist, not a denylist.** `origin=` must be an
+   `Origin.<member>`, an unrebound module constant, or a stored record's
+   `.origin`. Round 9's finding was closed by inverting rather than by adding
+   another pattern. A denylist here has to guess the attack; the allowlist does
+   not.
+3. **`_bound_names_in` collects every binding form** — assignment, walrus, tuple
+   unpack, `for`, `with as`, `except as`, imports, nested defs. It is
+   deliberately unusual. **Do not "simplify" it back to a parameter check**; that
+   is precisely the round-9 defect.
+4. **Two limits are documented rather than chased.** A name-based AST check
+   cannot defeat `getattr(store, "update_approval")`, and cannot distinguish a
+   stored record's `.origin` from one parsed out of a request body. Both are
+   stated in the test docstrings, in `STATUS.md` and in `02_ARCHITECTURE.md`.
+   The guarantee is the *conjunction* of the AST sweep and the behavioural gate
+   tests — not either alone. `STATUS.md` no longer says "impossible by
+   construction", because that was more than the checks could prove.
+5. **The live cross-tier test must be able to go red.** It used to skip silently
+   when no server was listening while CI never started one — green forever,
+   proving nothing. `MCPFORGE_LIVE_REQUIRED=1` now makes it fail, and the web CI
+   job starts `scripts/live_api.py` and tears it down under `if: always()`.
+
+**What NOT to change accidentally.** `_bound_names_in` and the inverted origin
+allowlist (decisions 2 and 3). The three-name set in sub-check (c) —
+`update_approval`, `create_approval`, `decide_approval` — confined to
+`api/approvals.py`. The `assert offenders` self-guards on every sub-check; a
+sweep that scans nothing reports green. `MCPFORGE_LIVE_REQUIRED` and the CI step
+that starts the server. The honesty paragraphs in the test docstrings — they
+record real escapes, not hypotheticals.
+
+**Still open.** `F7-02` and `F7-03` remain `DONE, PARTIALLY BLOCKED`. The gate
+holds, but nothing consumes an approved `REPOSITORY_BINDING` or
+`WORKFLOW_SELECTION`, and no stage persists an artifact, so "human approves →
+execution continues" is unmet and the read tools honestly return
+`available: false`. That is `F9-01`, not a Phase 7 defect. Playwright E2E is
+`F9-03`. `F6-05` still needs a public URL.
+
+**Next intended task.** `F8-01` — the attestation evidence model. `F8-02` stays
+`BLOCKED` on B-04 and is never marked done on a simulation.

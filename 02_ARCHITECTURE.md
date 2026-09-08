@@ -312,8 +312,8 @@ Every endpoint a WebMCP tool can reach lives under `/api/agent` (`services/api/s
 
 Three properties make the central claim true, and each is tested:
 
-1. **No decide route exists under `/api/agent`.** Deciding an approval lives in `api/approvals.py` and stamps `Origin.HUMAN` from a verified token.
-2. **Mutation endpoints stop at the gate.** They record an artifact, open an approval request, and return `awaiting_human_approval`. `api/agent.py` imports no transition function and no `RunState`.
+1. **No decide route exists under `/api/agent`.** Deciding an approval lives in `api/approvals.py` and stamps `Origin.HUMAN` from a verified token. This is not enforced by enumerating routes — it is enforced by an AST sweep over every backend module that permits assigning a decision field, `model_copy(update=...)`-ing one on, and calling `create_approval` / `update_approval` / `decide_approval` in `api/approvals.py` alone. A second router that re-entered `decide_approval` would therefore fail the suite even though it declares no "decide" path of its own. The sweep matches on names and is deliberately not claimed to be exhaustive against deliberate indirection; the behavioural gate tests in property 2 are what hold regardless of spelling.
+2. **Mutation endpoints stop at the gate.** They record an artifact, open an approval request, and return `awaiting_human_approval`. That no agent endpoint moves the run forward is checked behaviourally, not by reading imports: every agent POST is driven and the session's stored state is compared before and after (`test_no_agent_endpoint_transitions_the_session`). The state is what the orchestrator reads, so an agent transitioning the session would be the gate opening with no decision.
 3. **Hashes are derived, not accepted.** The hash an approval binds to comes from stored artifact content.
 
 Both the human UI and the agent surface create approvals through one function, `open_gate_request` in `api/approvals.py`. A second approval-creation path is what would let an agent-only route around the gate open up without the human path changing.

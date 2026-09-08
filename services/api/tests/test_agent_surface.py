@@ -79,10 +79,17 @@ def seed_plan(client: TestClient, session_id: str, uid: str = OWNER) -> None:
     )
 
 
-#: Every gate-opening endpoint, with a body that passes validation. These lists
-#: are hand-maintained, so `test_every_agent_post_route_is_swept` enumerates the
-#: router and fails when a route appears in neither — otherwise a newly added
-#: endpoint would be swept by nothing while the sweeps read as exhaustive.
+#: Every gate-opening endpoint, with a body that passes validation.
+#:
+#: These lists are hand-maintained and are **not** claimed to be exhaustive. An
+#: earlier version of this file enumerated the router and failed when a route
+#: appeared in neither list; that enumerator was removed after three review
+#: rounds found a different blind spot in each version of it (a nested include,
+#: a second router, a mounted sub-app). Exhaustiveness over routes is not how
+#: this file establishes its security property any more — that job belongs to
+#: the route-independent property tests below, which scan every backend module
+#: and hold no matter how a route is mounted. These lists exist so the
+#: behavioural sweeps have concrete endpoints to drive.
 MUTATION_TOOLS: list[tuple[str, dict[str, object]]] = [
     ("repository", {"repository_full_name": "acme/site", "branch": "main"}),
     ("workflows", {"workflow_ids": ["searchRooms"]}),
@@ -117,9 +124,28 @@ def seed_prerequisites(client: TestClient, session_id: str) -> None:
 READ_TOOLS: list[str] = ["status", "workflows", "plan", "validation"]
 
 
-#: The agent router speaks only these two verbs. Restricting the vocabulary is
-#: what lets the sweeps below be keyed on path: a PATCH added to a path a POST
-def test_only_one_function_may_change_an_approvals_status() -> None:
+#: The three fields that, together, are a recorded human decision.
+DECISION_FIELDS = {"status", "actor_uid", "decided_at"}
+
+#: The one module allowed to write or persist one.
+DECISION_HOME = "mcpforge/api/approvals.py"
+
+#: `agents/interaction.py::commit_decision` returns a decided `Approval` as a
+#: *value*. It is allowed to build one and cannot record one: persisting it
+#: needs `Store.update_approval`, and sub-check (c) below permits that call in
+#: `DECISION_HOME` alone. The guarantee is the conjunction of the two — a value
+#: nothing can store is not a decision.
+COPY_ALLOWED = {DECISION_HOME, "mcpforge/agents/interaction.py"}
+
+
+def _root_name(node: ast.expr) -> str | None:
+    """The base identifier of `x`, `x.y` or `x.y.z`, if there is one."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def test_only_one_module_may_write_an_approval_decision() -> None:
     """The security property, stated once and route-independently.
 
     Seven review rounds were spent trying to prove "no route can approve
@@ -128,37 +154,114 @@ def test_only_one_function_may_change_an_approvals_status() -> None:
     each fix traded away what the previous one caught. Enumeration is the wrong
     shape for this: there is no bounded list of ways to add a route.
 
-    This is the property those sweeps were reaching for. If `decide_approval` is
-    the only code that can move an approval off PENDING, then no endpoint can
-    approve anything regardless of how it is mounted, what verb it uses, or
-    whether it appears in the OpenAPI schema. A new route cannot evade it,
-    because it does not look at routes at all.
+    So the property is about *writing a decision*, not about a route. Three
+    ways exist to move an approval off PENDING, and all three are swept across
+    every backend module:
+
+    (a) assigning a decision field — `approval.status = APPROVED`
+    (b) copying one on — `pending.model_copy(update={"status": APPROVED})`
+    (c) persisting one — `store.update_approval(...)`, `create_approval(...)`,
+        or re-entering the project's own `decide_approval(...)`
+
+    (b) and (c) exist because round 7 proved (a) alone was not enough: a second
+    `APIRouter(prefix="/api/agent")` in a new module flipped approvals to
+    APPROVED through `model_copy` + `update_approval`, and the whole suite
+    stayed green while the gate opened with no human decision. `decide_approval`
+    joined (c) in round 8 for the same reason: a second agent router that simply
+    *called* the real decision handler reached APPROVED with no human, and
+    stamped the timeline `HUMAN:approval.decided` while doing it.
+
+    None of this looks at routes, so a new endpoint cannot evade it regardless
+    of how it is mounted, what verb it uses, or whether it reaches the OpenAPI
+    schema.
+
+    **What this test does and does not prove.** Sub-checks (b) and (c) match on
+    *names* in the AST, so they catch straightforwardly-written paths — the ones
+    a mistake, a refactor, or a generated route would actually take. They do not
+    and cannot decide the general case: `getattr(store, "update_approval")` with
+    a non-literal `update=` dict built under a non-approval-named local defeats
+    any name-based check. No AST rule closes that, and widening the denylist
+    only moves the boundary. The guarantee is the *conjunction* of this sweep
+    with the behavioural gate tests below — `test_every_mutation_tool_stops_at_a_
+    human_decision`, `test_a_mutation_tool_leaves_the_gate_shut`,
+    `test_a_read_tool_changes_nothing` and
+    `test_no_agent_endpoint_transitions_the_session` — which assert against the
+    *stored record* and hold however the write was spelled.
     """
-    offenders: list[str] = []
+    assigned: list[str] = []
+    copied: list[str] = []
+    persisted: list[str] = []
+
     for path in python_files():
+        rel = str(path.relative_to(SRC))
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
-            # `approval.status = ...` anywhere but the one function allowed to.
-            targets = node.targets if isinstance(node, ast.Assign) else []
-            if isinstance(node, ast.AugAssign):
+            # (a) `approval.status = ...`
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+            elif isinstance(node, ast.AugAssign):
                 targets = [node.target]
             for target in targets:
                 if (
                     isinstance(target, ast.Attribute)
-                    and target.attr in {"status", "actor_uid", "decided_at"}
+                    and target.attr in DECISION_FIELDS
                     and isinstance(target.value, ast.Name)
                     and "approval" in target.value.id.lower()
                 ):
-                    offenders.append(f"{path.relative_to(SRC)}:{target.lineno}")
+                    assigned.append(f"{rel}:{target.lineno}")
 
-    allowed = {"mcpforge/api/approvals.py"}
-    unexpected = [o for o in offenders if o.rsplit(":", 1)[0] not in allowed]
-    assert not unexpected, (
-        "an approval's decision fields are written outside api/approvals.py: "
-        + ", ".join(sorted(unexpected))
-        + ". Only decide_approval may record a human decision."
+            if not isinstance(node, ast.Call):
+                continue
+
+            # (b) `x.model_copy(update={"status": ...})`
+            if isinstance(node.func, ast.Attribute) and node.func.attr in {"model_copy", "copy"}:
+                receiver = _root_name(node.func.value) or ""
+                for kw in node.keywords:
+                    if kw.arg != "update":
+                        continue
+                    if not isinstance(kw.value, ast.Dict):
+                        # An `update=` we cannot read is only a hole when it is
+                        # applied to something approval-shaped; flag that case
+                        # rather than let a dict built elsewhere slip past.
+                        if "approval" in receiver.lower():
+                            copied.append(f"{rel}:{node.lineno}")
+                        continue
+                    keys = {
+                        k.value
+                        for k in kw.value.keys
+                        if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                    }
+                    if keys & DECISION_FIELDS:
+                        copied.append(f"{rel}:{node.lineno}")
+
+            # (c) persisting an approval, however it was built.
+            called = node.func.attr if isinstance(node.func, ast.Attribute) else None
+            if isinstance(node.func, ast.Name):
+                called = node.func.id
+            if called in {"update_approval", "create_approval", "decide_approval"}:
+                persisted.append(f"{rel}:{node.lineno}")
+
+    # Self-guards. Each sub-check must have found its known-good instance, or
+    # it is scanning nothing and the assertions below are vacuous.
+    assert assigned, "sub-check (a) found no decision-field assignment anywhere"
+    assert copied, "sub-check (b) found no decision-carrying model_copy anywhere"
+    assert persisted, "sub-check (c) found no approval-persisting call anywhere"
+
+    def outside(found: list[str], allowed: set[str]) -> list[str]:
+        return sorted(f for f in found if f.rsplit(":", 1)[0] not in allowed)
+
+    violations = {
+        "assigns a decision field": outside(assigned, {DECISION_HOME}),
+        "copies a decision onto an approval": outside(copied, COPY_ALLOWED),
+        "persists an approval": outside(persisted, {DECISION_HOME}),
+    }
+    reported = [f"{what}: {', '.join(where)}" for what, where in violations.items() if where]
+    assert not reported, (
+        "a decision is written outside api/approvals.py:\n"
+        + "\n".join(reported)
+        + "\nOnly decide_approval may record a human decision."
     )
-    assert offenders, "the check found no writes at all — it is scanning nothing"
 
 
 def test_the_agent_module_never_writes_an_approval_decision() -> None:
@@ -209,14 +312,51 @@ def test_a_read_tool_changes_nothing(client: TestClient, path: str) -> None:
     ).json()
 
     before = client.get(f"/api/sessions/{session_id}/events", headers=auth()).json()
+    state_before = _session_state(client, session_id)
     response = client.get(f"/api/agent/sessions/{session_id}/{path}", headers=auth())
     assert response.status_code == 200, path
     after = client.get(f"/api/sessions/{session_id}/events", headers=auth()).json()
 
     assert len(after) == len(before), f"GET {path} wrote {len(after) - len(before)} event(s)"
+    assert _session_state(client, session_id) == state_before, f"GET {path} moved the session"
     approval = client.get(f"/api/approvals/{asked['approval_id']}", headers=auth()).json()
     assert approval["status"] == "PENDING", f"GET {path} decided an approval"
     assert approval["actor_uid"] is None
+
+
+def _session_state(client: TestClient, session_id: str, uid: str = OWNER) -> str:
+    """The session's state, read out of the store rather than a response body.
+
+    A response could report the old state while the record moved on.
+    """
+    store = client.app.state.store  # type: ignore[attr-defined]
+    return str(asyncio.run(store.get_session(session_id, uid)).state.value)
+
+
+@pytest.mark.parametrize(("path", "payload"), MUTATION_TOOLS + STAGE_TOOLS)
+def test_no_agent_endpoint_transitions_the_session(
+    client: TestClient, path: str, payload: dict[str, object]
+) -> None:
+    """`api/agent.py` and `02_ARCHITECTURE.md` §10.1 both claim no agent endpoint
+    transitions the session, and both said "each is tested" when this one was
+    not: inserting a `session.state = ...; await store.update_session(session)`
+    into `select_workflows` left the whole suite green.
+
+    An agent moving the run forward is the gate opening without a decision —
+    the state is what the orchestrator reads. So the claim is checked
+    behaviourally, against the stored record, for every agent POST.
+    """
+    session_id = make_session(client)
+    seed_prerequisites(client, session_id)
+
+    before = _session_state(client, session_id)
+    response = client.post(f"/api/agent/sessions/{session_id}/{path}", json=payload, headers=auth())
+    assert response.status_code == 200, f"{path}: {response.text}"
+
+    assert _session_state(client, session_id) == before, (
+        f"POST {path} moved the session from {before} to "
+        f"{_session_state(client, session_id)} with no human decision"
+    )
 
 
 # -- F7-02 read tools -------------------------------------------------------
@@ -614,28 +754,220 @@ def _api_modules() -> list[pathlib.Path]:
     return sorted(p for p in api.glob("*.py") if p.name != "__init__.py")
 
 
+def _annotation_names(tree: ast.Module) -> set[str]:
+    """Every identifier used as a function-parameter annotation in a module.
+
+    This is how a Pydantic model becomes a *request body*: FastAPI binds a body
+    to a parameter annotated with the model. Response models appear as return
+    annotations and in `response_model=`, never here.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        args = node.args
+        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+            if arg is None or arg.annotation is None:
+                continue
+            for sub in ast.walk(arg.annotation):
+                if isinstance(sub, ast.Name):
+                    names.add(sub.id)
+    return names
+
+
 def test_no_request_model_declares_an_origin_field() -> None:
     """If a request body could carry an origin, FastAPI would bind it and the
     server-side derivation would be bypassed. Parsed, not grepped: comments and
-    docstrings explaining this rule must not satisfy it."""
+    docstrings explaining this rule must not satisfy it.
+
+    Any `BaseModel` bound to a parameter counts, not only one whose name ends
+    `Body` — that naming convention was the whole check until round 7, so a
+    model called anything else was free to carry an origin. Response models are
+    excluded because FastAPI never binds a caller's input to one; they legitimately
+    carry the origin the server derived, on the way out.
+    """
+    declaring_origin: list[str] = []
+    bound_models: list[str] = []
     offenders: list[str] = []
+
     for path in _api_modules():
         tree = ast.parse(path.read_text())
+        bound = _annotation_names(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
             bases = {b.id for b in node.bases if isinstance(b, ast.Name)}
             if "BaseModel" not in bases:
                 continue
-            for stmt in node.body:
-                if (
-                    isinstance(stmt, ast.AnnAssign)
-                    and isinstance(stmt.target, ast.Name)
-                    and stmt.target.id == "origin"
-                    and node.name.endswith("Body")
-                ):
-                    offenders.append(f"{path.name}:{node.name}.origin")
+            if node.name in bound:
+                bound_models.append(f"{path.name}:{node.name}")
+            has_origin = any(
+                isinstance(stmt, ast.AnnAssign)
+                and isinstance(stmt.target, ast.Name)
+                and stmt.target.id == "origin"
+                for stmt in node.body
+            )
+            if not has_origin:
+                continue
+            declaring_origin.append(f"{path.name}:{node.name}")
+            if node.name in bound:
+                offenders.append(f"{path.name}:{node.name}.origin")
+
+    assert declaring_origin, "no BaseModel in the API layer declares origin — scanning nothing"
+    assert bound_models, "no BaseModel is bound to a parameter — the body detection is broken"
     assert not offenders, "request body carries a caller-settable origin:\n" + "\n".join(offenders)
+
+
+def _module_level_names(tree: ast.Module) -> set[str]:
+    """Names bound at module scope. Nothing at module scope can see a request."""
+    names: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            names.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names.add(stmt.target.id)
+    return names
+
+
+def _bound_names_in(func: ast.AST) -> set[str]:
+    """Every name rebound anywhere inside `func` — parameters plus assignments.
+
+    A module-level constant is only server-derived while the function leaves it
+    alone. `ORIGIN = Origin(payload["origin"])` inside a handler rebinds the
+    name locally, and a check that looked only at parameters would still read it
+    as the module constant.
+    """
+    names: set[str] = set()
+
+    def add(target: ast.expr) -> None:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Tuple | ast.List):
+            for element in target.elts:
+                add(element)
+        elif isinstance(target, ast.Starred):
+            add(target.value)
+
+    if isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef):
+        args = func.args
+        names.update(
+            a.arg
+            for a in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+            if a is not None
+        )
+
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                add(target)
+        elif isinstance(
+            node, ast.AnnAssign | ast.AugAssign | ast.NamedExpr | ast.For | ast.AsyncFor
+        ):
+            add(node.target)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            add(node.optional_vars)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            names.add(node.name)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+
+    return names
+
+
+def test_no_api_module_takes_an_events_origin_from_its_caller() -> None:
+    """Origin is derived server-side in every API module, not just `agent.py`.
+
+    Stated as an **allowlist**, not a denylist. Until round 8 the rule was "an
+    `origin=` may not be *rooted at a parameter*", which is a guess about the
+    shape of the attack. It missed the shape that matters:
+
+        payload = await request.json()
+        RunEvent(..., origin=Origin(payload["origin"]))
+
+    — a subscript, so it has no root name at all, so nothing flagged it, and an
+    agent could label its own event HUMAN. Widening the denylist would invite
+    the next variant. So the check now enumerates what is *legitimate* and
+    rejects everything else. An `origin=` argument in `api/` must be one of:
+
+    (1) an `Origin.<member>` — the server naming the origin outright;
+    (2) a module-level constant, e.g. `agent.py`'s `ORIGIN`, *that the function
+        does not rebind* — module scope cannot see a request, so an untouched
+        module name is server-derived by construction. Round 9 found the round-8
+        version of this clause excluded only parameters, so
+        `ORIGIN = Origin(payload["origin"])` inside a handler read as the module
+        constant and passed; the clause now rejects any name bound anywhere in
+        the function body;
+    (3) a `<record>.origin` read whose root is not a parameter — echoing back
+        the origin a stored record already carries.
+
+    Anything else — a subscript, a call result, a conditional, a literal string,
+    a parameter — is an offender, whether or not anyone has thought of it yet.
+    All six existing call sites already satisfy this, so the inversion costs
+    nothing today and constrains everything written tomorrow.
+
+    **What this test does and does not prove.** Clause (3) reads a `.origin`
+    attribute and cannot tell a stored record from an object built in the
+    handler out of the request body: `parsed = Note.model_validate(await
+    request.json())` followed by `origin=parsed.origin` satisfies it. That
+    distinction is not available to an AST — it is the same limitation as the
+    `getattr` hole documented on
+    `test_only_one_module_may_write_an_approval_decision`, and widening the
+    rule only moves the boundary. The guarantee against a hand-parsed body is
+    the behavioural origin tests — `test_the_agent_router_never_sets_a_human_
+    origin` and the timeline assertions in the agent-surface gate tests — which
+    assert against the *stored event* however its origin was spelled.
+    """
+    checked = 0
+    offenders: list[str] = []
+    for path in _api_modules():
+        tree = ast.parse(path.read_text())
+        constants = _module_level_names(tree)
+        for func in ast.walk(tree):
+            if not isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            args = func.args
+            params = {
+                a.arg
+                for a in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+                if a is not None
+            }
+            bound = _bound_names_in(func)
+            for node in ast.walk(func):
+                if not isinstance(node, ast.Call):
+                    continue
+                for kw in node.keywords:
+                    if kw.arg != "origin":
+                        continue
+                    checked += 1
+                    value = kw.value
+                    root = _root_name(value)
+                    enum_member = (
+                        isinstance(value, ast.Attribute)
+                        and isinstance(value.value, ast.Name)
+                        and value.value.id == "Origin"
+                    )
+                    constant = (
+                        isinstance(value, ast.Name)
+                        and value.id in constants
+                        and value.id not in bound
+                    )
+                    record_read = (
+                        isinstance(value, ast.Attribute)
+                        and value.attr == "origin"
+                        and root is not None
+                        and root not in params
+                    )
+                    if not (enum_member or constant or record_read):
+                        offenders.append(
+                            f"{path.name}:{node.lineno}: origin={ast.unparse(value)} is not an "
+                            "Origin member, a module constant, or a stored record's origin"
+                        )
+
+    assert checked, "no origin= keyword was inspected at all — the scan found nothing"
+    assert not offenders, "origin is not server-derived:\n" + "\n".join(offenders)
 
 
 def test_the_agent_router_derives_origin_from_a_module_constant() -> None:
