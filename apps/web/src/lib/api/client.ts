@@ -20,6 +20,7 @@ import type {
   RepositoryDto,
   SessionDto,
   StageDto,
+  TrustStateDto,
   TurnDto,
 } from "@/lib/api/types";
 
@@ -215,6 +216,14 @@ export class ApiClient {
     return this.request<AccessDto>(`/api/projects/${projectId}/access/elevate`, {
       method: "POST",
     });
+  }
+
+  /**
+   * Trust panel state — F8-03. Read-only, and the only source the panel has for
+   * everything except the browser's WebMCP support, which no server can know.
+   */
+  getTrust(sessionId: string): Promise<TrustStateDto> {
+    return this.request<TrustStateDto>(`/api/sessions/${sessionId}/trust`);
   }
 
   revokeAccess(projectId: string): Promise<AccessDto> {

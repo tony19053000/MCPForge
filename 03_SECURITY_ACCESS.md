@@ -181,6 +181,24 @@ stands.
 
 The "exactly one producer" rule is enforced by an AST sweep over every backend module, matching the attribute, the bare name and the string literal. Like the approval sweep in §6 of `02_ARCHITECTURE.md`, it matches on names: it catches straightforwardly-written code and does not defeat deliberate indirection such as `getattr(TrustLevel, name)`. The guarantee is that sweep **plus** the behavioural tests that every rejection path returns `DEVELOPMENT_ISOLATION`.
 
+**The UI half of T7 (F8-03).** The trust panel renders the trust level as an
+enum read from `/api/sessions/{id}/trust`, never a boolean and never a
+client-side default. The verified wording — "Hardware-backed Confidential
+Execution Verified" — exists in exactly one component branch,
+`apps/web/src/components/trust/secure-execution-row.tsx`, guarded by the single
+comparison against the attested value that exists anywhere in `apps/web/src`.
+Both facts are asserted against the TypeScript AST by
+`apps/web/tests/trust-verified-branch.test.ts`, and
+`apps/web/tests/trust-panel.test.tsx` asserts that development isolation renders
+with the explicit "Not hardware-attested" line and with no success tone or tick
+anywhere in the panel. Since nothing in the product obtains an attestation
+token, the panel today always renders the unattested state; the verified branch
+is unreachable in the running product rather than merely unused.
+
+The quarantine row shows paths and never contents — quarantined files are never
+opened, so no content exists to show — and shows an absent count rather than
+zero until an analysis has actually run.
+
 ## 3. Sandbox rules for repository jobs
 
 - Ephemeral workspace per run, destroyed on completion and on failure.

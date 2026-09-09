@@ -540,7 +540,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** No verified styling for `DEVELOPMENT_ISOLATION` — asserted by test; the quarantine count is real; the adapter state is real; the mock adapter renders a warning.
 **Tests.** RTL tests for each trust level and each adapter state; a test asserting the "Hardware-backed Confidential Execution Verified" string is unreachable unless the enum says so.
 **Security.** T7 control, UI half.
-**Status.** `PENDING`
+**Status.** `DONE` — `PASS` on the second review round. The panel renders `DEVELOPMENT_ISOLATION` today, because nothing in the product has ever obtained an attestation token.
 
 ### F8-04 — Agent 5: Validator and Agent Readiness Score
 **Purpose.** Prove the transformed application actually works for agents, with numbers we can defend.

@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mcpforge.api import agent, approvals, chat, generation, health, me, projects, repos
+from mcpforge.api import agent, approvals, chat, generation, health, me, projects, repos, trust
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
 from mcpforge.config import Settings, get_settings
+from mcpforge.execution.provider import SecureExecutionProvider
 from mcpforge.gemini.google_provider import GoogleGenAIProvider
 from mcpforge.gemini.provider import GeminiProvider
 from mcpforge.github.client import GitHubAppClient
@@ -50,11 +51,16 @@ def create_app(
     store: Store | None = None,
     gemini: GeminiProvider | None = None,
     github: GitHubAppClient | None = None,
+    executor: SecureExecutionProvider | None = None,
 ) -> FastAPI:
     """Build the application.
 
     `token_verifier` is injectable so tests exercise the real dependency chain
     with a locally signed key rather than mocking authentication away.
+
+    `executor` is left `None` by default because no route runs a repository job
+    yet. The trust panel reports that absence as an absence (`api/trust.py`);
+    it is not filled in with an assumed provider.
     """
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_output=settings.is_production)
@@ -75,6 +81,9 @@ def create_app(
     # In-memory is the Phase 2 store. Firestore lands behind the same port later.
     app.state.store = store or InMemoryStore()
     app.state.gemini = gemini or GoogleGenAIProvider(settings)
+    # No default: an execution provider is attached only by something that
+    # actually runs jobs. See `api/trust.py` for what the panel says meanwhile.
+    app.state.executor = executor
     app.state.github = github or GitHubAppClient(
         app_id=settings.github_app_id,
         private_key_path=settings.github_app_private_key_path,
@@ -96,6 +105,7 @@ def create_app(
     app.include_router(repos.router)
     app.include_router(generation.router)
     app.include_router(agent.router)
+    app.include_router(trust.router)
     return app
 
 

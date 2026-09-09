@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ApprovalDto, EventDto } from "@/lib/api/types";
+import type { ApprovalDto, EventDto, TrustStateDto } from "@/lib/api/types";
 
 /**
  * The workspace as a mounted component — round-2 review finding 2.
@@ -14,6 +14,7 @@ import type { ApprovalDto, EventDto } from "@/lib/api/types";
  */
 
 const listEvents = vi.fn<() => Promise<EventDto[]>>();
+const getTrust = vi.fn<() => Promise<TrustStateDto>>();
 const getApproval = vi.fn<() => Promise<ApprovalDto>>();
 const decideApproval = vi.fn<() => Promise<ApprovalDto>>();
 
@@ -36,6 +37,7 @@ const api = {
   })),
   listRepositories: vi.fn(async () => []),
   listEvents,
+  getTrust,
   getApproval,
   decideApproval,
   bindRepository: vi.fn(),
@@ -85,8 +87,40 @@ function pendingApproval(over: Partial<ApprovalDto> = {}): ApprovalDto {
   };
 }
 
+const TRUST: TrustStateDto = {
+  session_id: "sess_1",
+  project_id: "proj_1",
+  repository: {
+    bound: true,
+    repository_full_name: "acme/hotel-app",
+    base_branch: "main",
+    is_demo: false,
+  },
+  access_mode: "READ_ONLY",
+  secret_filtering: {
+    active: true,
+    rule_count: 42,
+    analyzed: true,
+    quarantined_count: 2,
+    quarantined_paths: [".env", "server.pem"],
+  },
+  secure_execution: {
+    trust_level: "DEVELOPMENT_ISOLATION",
+    configured_executor: "development",
+    provider_running: false,
+    evidence: null,
+    detail: "No execution provider is running in this API process.",
+  },
+  branch_protection: {
+    branch_prefix: "mcpforge/",
+    branch_shape: "^mcpforge/webmcp-[a-z0-9][a-z0-9-]{0,59}$",
+    protected_names: ["main"],
+  },
+};
+
 beforeEach(() => {
   listEvents.mockReset().mockResolvedValue([]);
+  getTrust.mockReset().mockResolvedValue(TRUST);
   getApproval.mockReset();
   decideApproval.mockReset();
 });
@@ -178,6 +212,27 @@ describe("an approval an agent opened is reachable", () => {
     await waitFor(() => expect(listEvents).toHaveBeenCalled());
     expect(getApproval).not.toHaveBeenCalled();
     expect(screen.getByText(/Nothing needs your decision/)).toBeInTheDocument();
+  });
+});
+
+describe("the trust panel is mounted, not merely written", () => {
+  it("reads trust state for the session and renders it", async () => {
+    render(<WorkspaceView />);
+
+    await waitFor(() => expect(getTrust).toHaveBeenCalledWith("sess_1"));
+    expect(await screen.findByText("Development Isolation")).toBeInTheDocument();
+    expect(screen.getByText("Not hardware-attested")).toBeInTheDocument();
+    expect(screen.getByText(/2 files quarantined/)).toBeInTheDocument();
+  });
+
+  it("shows no trust panel at all when the state cannot be read", async () => {
+    // A stale or invented panel would be worse than none: the rows are security
+    // claims, and the last known answer may no longer be true.
+    getTrust.mockRejectedValue(new Error("network"));
+    render(<WorkspaceView />);
+
+    await waitFor(() => expect(getTrust).toHaveBeenCalled());
+    expect(screen.queryByText("Not hardware-attested")).not.toBeInTheDocument();
   });
 });
 

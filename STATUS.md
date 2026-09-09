@@ -6,7 +6,7 @@
 
 ## Overall completion
 
-**86%** — Phase 8 in progress. `F8-01`, `F8-02a` and `F8-02b` complete, verified by `[REVIEWER / TESTER]` on rounds 4, 7 and 2.
+**88%** — Phase 8 in progress. `F8-01`, `F8-02a`, `F8-02b` and `F8-03` complete, verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2 and 2.
 
 ## Current phase
 
@@ -18,7 +18,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-None. Next intended task is `F8-03` — the trust panel. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
+`F8-04` — the validator and Agent Readiness Score — is `IN_REVIEW`. `F8-05` follows it. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
 
 ---
 
@@ -72,6 +72,7 @@ None. Next intended task is `F8-03` — the trust panel. `F8-02` stays `BLOCKED`
 | F8-01 | Attestation evidence model | PASS (round 4) |
 | F8-02a | Confidential Space workload image | PASS (round 7) |
 | F8-02b | Confidential Space infrastructure and workload identity | PASS (round 2) — script written and plan-verified; never applied |
+| F8-03 | Trust panel | PASS (round 2) — renders `DEVELOPMENT_ISOLATION`, the real state |
 
 ## In progress
 
@@ -132,7 +133,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1286 passing** — 222 web (Vitest/RTL), 1064 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1391 passing** — 249 web (Vitest/RTL), 1142 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -1030,3 +1031,101 @@ enabled, and the product reports `DEVELOPMENT_ISOLATION`.
 
 **Next intended task.** `F8-03` — the trust panel. It renders server state only,
 and that state is `DEVELOPMENT_ISOLATION`.
+
+---
+
+### 0014 — Phase 8: the digest moves when the workload moves, and that is the point
+
+**Not a ticket record.** A standing note, because the digest has now changed
+twice for the same reason and a future session will hit it a third time.
+
+The workload image contains backend source under `mcpforge/`, so **any change to
+a module the image carries changes the image, and therefore the digest.** That is
+not churn to be suppressed; it is what a content-addressed digest is *for*. The
+pin is what makes attestation mean something, and a pin that survived edits to
+the attested code would mean nothing.
+
+Recorded so far:
+
+| Digest | Produced by | Changed because |
+|---|---|---|
+| `sha256:9dffebfb…` | `F8-02a`, committed `07b3dab` | first reproducible build |
+| `sha256:31ed4925…` | `F8-02b`, committed `6c3040c` | the `google_service_accounts` fix touched `execution/attestation.py` |
+| `sha256:76a88540…` | `F8-03`/`F8-04` | those tickets touched `execution/provider.py` and `execution/development.py` |
+
+`test_the_readme_records_the_digest_that_is_actually_built` catches every one of
+these, which is why each was noticed immediately rather than at a live run.
+
+**When it moves, repin all four live sites** — `infra/confidential-space/README.md`,
+`infra/confidential-space/setup.sh`, `infra/confidential-space/policy.md` (three
+places: the summary table, the condition block, the principal-set example) — and
+regenerate the deliberate near-miss digest in
+`services/api/tests/test_confidential_space_setup.py`, which must stay exactly
+one character from the real one.
+
+**Do not repin the Context State Log.** Entries 0012 and 0013 record what their
+tickets produced and what their reviewers actually reproduced. A repinning sweep
+overwrote entry 0012 once and the reviewer caught it: CLAUDE.md §7 makes the log
+append-only, and a completed review's record is evidence, not configuration.
+Annotate here instead, as this entry does.
+
+**Consequence for B-04, and the reason this matters beyond tidiness.** The digest
+pinned in the attribute condition must be the digest of the image actually
+pushed. Any backend change after `build.sh --push` invalidates the pin, and the
+symptom is not a build error — it is a Confidential VM whose attestation is
+refused. So the order is: finish the code, push, then apply the setup, and repin
+if anything moves in between.
+
+---
+
+### 0015 — Phase 8: the trust panel says what is true
+
+**What was built.** `F8-03`: `apps/web/src/components/trust/**`, the panel from
+`04_FRONTEND_SPEC.md` §8; `services/api/src/mcpforge/api/trust.py`, which reads
+real server state; and `apps/web/tests/trust-panel.test.tsx` plus
+`apps/web/tests/trust-verified-branch.test.ts`.
+
+**What it renders today**, which is the point of the ticket: *Secure execution —
+Development Isolation*, with a neutral `ⓘ unverified` badge and an explicit
+**Not hardware-attested** line. No success tone and no green tick anywhere while
+unverified. That is not a placeholder awaiting better news; it is the true state,
+because nothing in the product has ever obtained an attestation token.
+
+**Decisions made.**
+1. **One verified branch, pinned by an AST sweep**, mirroring F8-01's backend
+   rule. `trust-verified-branch.test.ts` sweeps the web source for the reserved
+   phrase and for any comparison against `HARDWARE_ATTESTED`, with a non-empty
+   self-guard. The reviewer added a second component rendering the phrase, then
+   moved the phrase into the *unattested* branch of the existing file, and both
+   were caught. Same stated bound as the backend sweeps: it matches names, and
+   no name-based check defeats deliberate indirection.
+2. **Every row is server state, verified by mutation.** Hardcoding the
+   quarantine count, forcing `active`, or flipping the trust level each turns a
+   test red. The green tick on the WebMCP row is for browser feature detection,
+   which is genuinely observed, and the mock branch precedes it.
+3. **Paths only, never contents.** `quarantined_paths_of` copies one field and
+   only string entries. Two tests assert the planted secret and a
+   `BEGIN PRIVATE KEY` marker are absent from the raw response body.
+
+**Review gate outcome.** `PASS` on the second round. Round 1 returned `FAIL` with
+one finding, and it is worth recording because it is a third distinct variant of
+this phase's recurring defect: **a test that passes because a fixture happens to
+match a constant.** `test_the_quarantine_count_is_the_filter_pipelines_own_record`
+asserted `quarantined_count == len(result.quarantined_paths)` against a fixture
+that always quarantines exactly three files, so replacing the endpoint's
+`len(paths)` with a literal `3` left the entire API suite green. The acceptance
+criterion says "the quarantine count is real", and on the backend it was not
+pinned at all — the web tier had pinned its half correctly. Fixed by
+parametrising over two fixtures with different counts, so no constant satisfies
+both, plus a guard that fails loudly if the pipeline ever stops varying the
+count. The reviewer confirmed by disabling `.pem` detection at both routes.
+
+**What NOT to change accidentally.** The single-branch rule and its sweep's
+self-guard. The `is not None` guards around trust state — a truthy coercion was
+one of the mutations that had to fail. The parametrisation of the quarantine
+count: a single fixture cannot distinguish a real count from a lucky constant.
+
+**Open issues.** None for this ticket. The panel will render the verified state
+only when `F8-02` produces a real `HARDWARE_ATTESTED`, which needs B-04 cleared.
+
+**Next intended task.** `F8-04` is `IN_REVIEW`; `F8-05` follows it.

@@ -384,6 +384,52 @@ Two gates were added for the agent surface: `REPOSITORY_BINDING` and `WORKFLOW_S
 
 `start_repository_analysis`, `generate_patch`, `run_security_review` and `run_validation` record the request on the timeline and return `started: false`. The orchestrator does not yet act on them, and no stage persists an `ANALYSIS`, `TOOL_PLAN`, `SECURITY_REVIEW` or `VALIDATION` artifact, so the corresponding read tools report `available: false` against a real run. Returning `started: true` would be a hardcoded value that makes a check look passed. Wiring is tracked as **F9-01**.
 
+### 10.4 The trust panel — `/api/sessions/{id}/trust`
+
+`services/api/src/mcpforge/api/trust.py` assembles what the trust panel
+(`04_FRONTEND_SPEC.md` §8) renders, for one session. Every row is read from the
+thing that already decides the behaviour rather than described alongside it: the
+boundary and access mode from the stored `Project`; the quarantine list from the
+persisted `ANALYSIS` artifact's `quarantined_paths`, which is the filtering
+pipeline's own output, paths only; the branch rules from the live constants in
+`github/branches.py`; and the execution row from the running provider's
+`trust_level` and `attestation()`, passed through `AttestationOutcome` so the
+"no evidence, no raised trust level" invariant is enforced by the one
+implementation of it in `execution/attestation.py` rather than restated.
+
+Three deliberate absences:
+
+- **The endpoint never names the attested trust level.** It performs no
+  comparison against it and derives no boolean from it; the enum is passed
+  through and the web tier does the single comparison it is allowed. That keeps
+  the module inside F8-01's single-producer sweep, which forbids the member
+  appearing anywhere but `verify_attestation_token`.
+- **No WebMCP field.** Whether `document.modelContext` exists is a fact about
+  the browser; a server answer would be a guess. The panel's adapter row is fed
+  the `WebMCPState` the real adapter produced.
+- **No execution provider is attached by default.** `create_app` takes one and
+  stores it on `app.state.executor`, defaulting to `None` because no route runs
+  a repository job yet (§10.3). The row reports that absence as
+  `provider_running: false` rather than implying a provider that is not there.
+
+Because no stage persists an `ANALYSIS` artifact yet (§10.3), the filtering row
+in the running product currently reads "Active · nothing analyzed yet". The
+count is `null` rather than `0` until an analysis has actually run: zero would
+read as "scanned and clean" for a scan that never happened. The wiring is
+exercised end to end by
+`test_the_quarantine_count_is_the_filter_pipelines_own_record`, which runs the
+real `filter_tree` over a fixture with planted credentials and compares the
+panel's count against the pipeline's own record.
+
+On the web tier, `apps/web/src/components/trust/secure-execution-row.tsx` holds
+the product's only verified-execution branch.
+`apps/web/tests/trust-verified-branch.test.ts` parses the TypeScript AST of
+`apps/web/src` and fails if the verified phrase occurs more than once, if more
+than one comparison against the attested value exists, or if the phrase is not
+inside a branch that comparison guards. It matches on the literal value and so
+has the same stated limit as the backend sweeps: it does not defeat deliberate
+indirection.
+
 ## 11. Agent Readiness Score
 
 Computed by deterministic code from the Validator's executed checks. Gemini is never asked to produce a score.

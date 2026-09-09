@@ -153,3 +153,67 @@ export interface StageDto {
   started: boolean;
   detail: string;
 }
+
+// -- trust panel (F8-03, 04_FRONTEND_SPEC.md §8) ---------------------------
+
+/**
+ * The execution boundary as an enum, never a boolean. Flattening it to
+ * `attested: true|false` on the way to the screen is exactly the mistake
+ * `02_ARCHITECTURE.md` §8 forbids.
+ */
+export type TrustLevel = "DEVELOPMENT_ISOLATION" | "HARDWARE_ATTESTED";
+
+export interface AttestationEvidenceDto {
+  issuer: string;
+  audience: string;
+  subject: string;
+  image_digest: string;
+  image_reference: string;
+  workload_service_account: string;
+  hardware_model: string;
+  software_name: string;
+  debug_status: string;
+  issued_at: string;
+  expires_at: string;
+  verified_at: string;
+}
+
+export interface SecureExecutionDto {
+  trust_level: TrustLevel;
+  configured_executor: "development" | "confidential_space";
+  provider_running: boolean;
+  evidence: AttestationEvidenceDto | null;
+  detail: string;
+}
+
+/**
+ * `quarantined_count` is `null` — not `0` — until an analysis has actually run.
+ * Zero would read as "scanned and clean" for a scan that never happened.
+ */
+export interface SecretFilteringDto {
+  active: boolean;
+  rule_count: number;
+  analyzed: boolean;
+  quarantined_count: number | null;
+  /** Paths only. Contents never leave the server, and never existed here. */
+  quarantined_paths: string[];
+}
+
+export interface TrustStateDto {
+  session_id: string;
+  project_id: string;
+  repository: {
+    bound: boolean;
+    repository_full_name: string | null;
+    base_branch: string | null;
+    is_demo: boolean;
+  };
+  access_mode: "READ_ONLY" | "WRITE_PR";
+  secret_filtering: SecretFilteringDto;
+  secure_execution: SecureExecutionDto;
+  branch_protection: {
+    branch_prefix: string;
+    branch_shape: string;
+    protected_names: string[];
+  };
+}

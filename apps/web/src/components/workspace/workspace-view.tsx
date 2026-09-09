@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApprovalCard } from "@/components/approval/approval-card";
 import { RepositoryPanel } from "@/components/repo/repository-panel";
+import { TrustPanel } from "@/components/trust/trust-panel";
 import { ActivityTimeline } from "@/components/workspace/activity-timeline";
 import { WebMCPStatus } from "@/components/workspace/webmcp-status";
 import { useWebMCP } from "@/webmcp/use-webmcp";
@@ -22,6 +23,7 @@ import type {
   ProjectDto,
   RepositoryDto,
   SessionDto,
+  TrustStateDto,
 } from "@/lib/api/types";
 
 /**
@@ -40,6 +42,9 @@ export function WorkspaceView() {
   const [access, setAccess] = useState<AccessDto | null>(null);
   const [reposLoading, setReposLoading] = useState(true);
   const [events, setEvents] = useState<readonly EventDto[]>([]);
+  // Server-read security state for the trust panel — F8-03. Null until the
+  // first read succeeds: the panel is absent rather than guessed at.
+  const [trust, setTrust] = useState<TrustStateDto | null>(null);
 
   // Registers MCPForge's own WebMCP tools for this session, and tears them down
   // on unmount. Without this the tools exist but nothing can reach them.
@@ -101,6 +106,18 @@ export function WorkspaceView() {
     let cancelled = false;
 
     const poll = async () => {
+      // Re-read on every poll rather than once: access mode, the quarantine
+      // record and the execution boundary can all change during a session, and
+      // a stale trust panel is a flattering one. Kept in its own try so a
+      // failure here cannot stop the timeline from updating, or the reverse.
+      try {
+        const state = await api.getTrust(sessionId);
+        if (!cancelled) setTrust(state);
+      } catch {
+        // Nothing is shown rather than the last known answer.
+        if (!cancelled) setTrust(null);
+      }
+
       try {
         const latest = await api.listEvents(sessionId);
         if (cancelled) return;
@@ -193,6 +210,7 @@ export function WorkspaceView() {
           <RegionErrorBoundary region="context panel">
             <div className="flex flex-col gap-6 p-4">
               <WebMCPStatus state={webmcp} />
+              {trust ? <TrustPanel trust={trust} webmcp={webmcp} /> : null}
               {project && access ? (
                 <RepositoryPanel
                   project={project}
