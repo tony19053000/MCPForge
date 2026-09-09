@@ -6,7 +6,7 @@
 
 ## Overall completion
 
-**88%** — Phase 8 in progress. `F8-01`, `F8-02a`, `F8-02b` and `F8-03` complete, verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2 and 2.
+**89%** — Phase 8 in progress. `F8-01`, `F8-02a`, `F8-02b`, `F8-03` and `F8-04` complete, verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2, 2 and 3.
 
 ## Current phase
 
@@ -18,7 +18,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-`F8-04` — the validator and Agent Readiness Score — is `IN_REVIEW`. `F8-05` follows it. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
+`F8-05` — the before/after demonstration — is the last buildable ticket in Phase 8. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
 
 ---
 
@@ -73,6 +73,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 | F8-02a | Confidential Space workload image | PASS (round 7) |
 | F8-02b | Confidential Space infrastructure and workload identity | PASS (round 2) — script written and plan-verified; never applied |
 | F8-03 | Trust panel | PASS (round 2) — renders `DEVELOPMENT_ISOLATION`, the real state |
+| F8-04 | Agent 5: Validator and Agent Readiness Score | PASS (round 3) |
 
 ## In progress
 
@@ -1129,3 +1130,80 @@ count: a single fixture cannot distinguish a real count from a lucky constant.
 only when `F8-02` produces a real `HARDWARE_ATTESTED`, which needs B-04 cleared.
 
 **Next intended task.** `F8-04` is `IN_REVIEW`; `F8-05` follows it.
+
+---
+
+### 0016 — Phase 8: a score computed from what actually ran
+
+**What was built.** `F8-04`, agent 5:
+`services/api/src/mcpforge/agents/validator.py` runs the check suite inside the
+secure workspace with no outbound network — registration, discovery, schema
+validity, execution, invalid-input rejection, authorization gates, UI
+synchronisation, the regression suite, build and typecheck — and
+`services/api/src/mcpforge/orchestration/scoring.py` turns executed results into
+the Agent Readiness Score. `services/api/tests/test_validator.py` is 60 tests.
+
+**The four properties, each pinned by a named test that was made to fail.**
+1. **The verdict is `CommandResult.exit_code`.** The suite contains deliberately
+   persuasive output — `PASS: 7/7 checks green. Agent Readiness 100/100.` beside
+   a non-zero exit, and an apologetic failure text beside a zero — and the score
+   follows the exit code both times.
+2. **A component with no evidence scores zero, labelled.** Not a default, and a
+   skipped check is a separate record carrying its reason.
+3. **Gemini is never asked for a score.** An AST sweep asserts no backend module
+   both prompts Gemini and touches the score, with non-empty self-guards. The
+   reviewer planted a `GeminiProvider`-based scorer and it was named and caught.
+4. **The weights are §11's**, parsed out of `02_ARCHITECTURE.md` rather than
+   compared against the code's own constant, and they sum to 100. A swap that
+   preserved the sum still failed.
+
+**The defect that mattered, and why it is the phase's recurring shape.** A tool
+with **no inputs** scored the full 10 ERROR_HANDLING points for a check that was
+never generated. `rejection_test_name` returned `""` for such a tool; the caller
+guarded with `is not None`, so `""` passed, and the command became `-t ''` —
+which vitest treats as matching *everything*, so the execution test's green
+result was scored as error handling. It now returns `None`, and the absent check
+is recorded as a skip with a reason so the report shows an absence rather than a
+component quietly not appearing.
+
+**A measured fact worth keeping.** `passWithNoTests: false` does **not** cover a
+`-t` name filter that matches nothing. vitest finds the file, marks every test in
+it skipped, and exits **0** — `Tests  2 skipped (2)`. So a renamed or deleted
+test would have scored full marks for a check that ran nothing.
+`vitest_ran_a_test` catches that and records such a run as skipped. Getting the
+detection right took two wrong attempts: a regex whose `\s+` gave back a space so
+a negative lookahead missed, and then a pattern that counted `skipped` as having
+run. Real output settled it, not reasoning about it.
+
+**Decisions made.**
+- **The generated test names live in one place.** `AUTHORIZATION_TEST_NAME`,
+  `EXECUTION_TEST_NAME` and `rejection_test_name` are defined in
+  `generation/test_template.py` and read by both the generator and the
+  validator's selectors, because two copies of that rule is how one stops
+  matching the other.
+- **`resolve_inside` is the one path-jail implementation**, in
+  `execution/provider.py`, delegated to by the executor and by anything that
+  writes into a workspace.
+- **Evidence coercion stays, and the rule is enforced over source.** Making
+  `ExecutedCheck.evidence` reject a mapping broke legitimate round-tripping, and
+  a validation context would put the discriminator in the hands of whoever wants
+  to bypass it. Instead two AST sweeps — one for a second `CheckEvidence(...)`
+  call site, one for a dict literal in the `evidence` position — with the bound
+  stated: bare and attribute-qualified calls are matched; an aliased import of
+  the class, a variable, or `getattr` are not.
+
+**Review gate outcome.** `PASS` on the third round. Rounds 1 and 2 returned
+`FAIL` with 5 and 1 findings. Four of those six were prose asserting more than
+the code did, including a comment citing a test that had never been written and
+two restatements of the `passWithNoTests` belief that had already been
+disproved. The last was a matcher narrower than the bound printed beside it —
+it matched `ExecutedCheck(...)` but not `scoring.ExecutedCheck(...)`, which is
+not indirection, just the other ordinary spelling.
+
+**What NOT to change accidentally.** `rejection_test_name` returning `None`
+rather than `""`. The `vitest_ran_a_test` pattern excluding `skipped`. The shared
+test-name constants. Both AST sweeps and their self-guards. The weights test
+parsing `02_ARCHITECTURE.md` rather than trusting the constant.
+
+**Next intended task.** `F8-05` — the before/after demonstration, the last
+buildable ticket in Phase 8. `F8-02` stays `BLOCKED` on B-04.

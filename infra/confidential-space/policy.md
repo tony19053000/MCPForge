@@ -31,7 +31,7 @@ declaration of intent that the script will make true when an operator runs
 | Issuer | `https://confidentialcomputing.googleapis.com` |
 | Workload service account | `mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com` |
 | Workload image | `us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload` |
-| Pinned digest | `sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2` |
+| Pinned digest | `sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db` |
 
 The issuer is the same string as `CONFIDENTIAL_SPACE_ISSUER` in
 `services/api/src/mcpforge/execution/attestation.py`, and
@@ -54,7 +54,7 @@ grows one.
 <!-- BEGIN ATTRIBUTE CONDITION -->
 ```cel
 assertion.swname == 'CONFIDENTIAL_SPACE'
-assertion.submods.container.image_digest == 'sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2'
+assertion.submods.container.image_digest == 'sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db'
 assertion.hwmodel in ['GCP_AMD_SEV', 'GCP_AMD_SEV_ES', 'GCP_AMD_SEV_SNP', 'GCP_INTEL_TDX']
 assertion.dbgstat == 'disabled-since-boot'
 'STABLE' in assertion.submods.confidential_space.support_attributes
@@ -232,7 +232,7 @@ changes.
 ```
 member = principalSet://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/
          workloadIdentityPools/mcpforge-confidential-space/
-         attribute.image_digest/sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2
+         attribute.image_digest/sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db
 role   = roles/iam.workloadIdentityUser
 ```
 

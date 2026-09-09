@@ -33,6 +33,7 @@ __all__ = [
     "TrustLevel",
     "Workspace",
     "WorkspaceSpec",
+    "resolve_inside",
 ]
 
 
@@ -105,3 +106,23 @@ class SecureExecutionProvider(Protocol):
     async def attestation(self) -> AttestationEvidence | None: ...
 
     async def destroy(self, workspace: Workspace) -> None: ...
+
+
+def resolve_inside(workspace: Workspace, relative: str) -> Path:
+    """Resolve a workspace-relative path and prove it stays inside the jail.
+
+    Symlinks are resolved first, so a link pointing out of the workspace is
+    rejected rather than followed.
+
+    This is the **one** implementation of the path jail. `DevelopmentSecureExecutor`
+    delegates to it and so does anything that writes into a workspace, because
+    two copies of a containment rule is how one of them ends up weaker than the
+    other — the exact failure that put a credential into the workload image
+    during `F8-02a`.
+    """
+    candidate = (workspace.root / relative).resolve()
+    try:
+        candidate.relative_to(workspace.root.resolve())
+    except ValueError as exc:
+        raise PathEscapeError(f"path {relative!r} resolves outside the workspace") from exc
+    return candidate

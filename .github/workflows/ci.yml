@@ -196,6 +196,53 @@ jobs:
             exit 1
           fi
 
+  validation:
+    name: Agent readiness validation (F8-04)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # The validator runs the real generated patch against the real fixture
+      # inside the real sandbox, so it needs a real dependency tree and a node
+      # binary the sandbox PATH can reach.
+      - run: npm ci
+      - name: node must be reachable on the sandbox PATH
+        run: |
+          if [ ! -x /usr/bin/node ]; then
+            ln -s "$(command -v node)" /usr/bin/node
+          fi
+          if [ ! -x /usr/bin/npm ]; then
+            ln -s "$(command -v npm)" /usr/bin/npm
+          fi
+          /usr/bin/node --version
+      - run: uv sync --frozen
+        working-directory: services/api
+      # Locally these tests skip when the Node toolchain is absent, so a
+      # developer without it is not shown a red bar. A skip that is green
+      # forever proves nothing, which is why CI sets this: here, "the toolchain
+      # is missing" is a failure.
+      - name: Validate the demo fixture end to end
+        working-directory: services/api
+        env:
+          MCPFORGE_VALIDATION_INTEGRATION_REQUIRED: "1"
+        run: uv run pytest tests/test_validator.py -q
+      - name: The validation integration run did not silently skip
+        working-directory: services/api
+        env:
+          MCPFORGE_VALIDATION_INTEGRATION_REQUIRED: "1"
+        run: |
+          uv run pytest tests/test_validator.py -q --no-header -rs | tee /tmp/validation.txt
+          if grep -qiE '[0-9]+ skipped' /tmp/validation.txt; then
+            echo "::error::a validation test skipped while it was required"
+            exit 1
+          fi
+
   secrets:
     name: No credentials in the tree
     runs-on: ubuntu-latest

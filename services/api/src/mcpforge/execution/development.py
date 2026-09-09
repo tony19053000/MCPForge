@@ -34,11 +34,11 @@ from mcpforge.execution.provider import (
     Command,
     CommandNotAllowedError,
     CommandResult,
-    PathEscapeError,
     SandboxError,
     TrustLevel,
     Workspace,
     WorkspaceSpec,
+    resolve_inside,
 )
 from mcpforge.logging import get_logger
 
@@ -134,15 +134,11 @@ class DevelopmentSecureExecutor:
     def resolve_inside(self, workspace: Workspace, relative: str) -> Path:
         """Resolve a path and prove it stays inside the jail.
 
-        Symlinks are resolved first, so a link pointing out of the workspace is
-        rejected rather than followed.
+        Delegates to `provider.resolve_inside`, which is the single
+        implementation of this rule. Kept as a method because every caller in
+        the codebase reaches it through the executor.
         """
-        candidate = (workspace.root / relative).resolve()
-        try:
-            candidate.relative_to(workspace.root.resolve())
-        except ValueError as exc:
-            raise PathEscapeError(f"path {relative!r} resolves outside the workspace") from exc
-        return candidate
+        return resolve_inside(workspace, relative)
 
     async def run(self, workspace: Workspace, command: Command) -> CommandResult:
         if not command.argv:

@@ -36,7 +36,7 @@ token and running a repository job is `F8-02`, which is `BLOCKED` on `B-04`.
 
 ```
 image:  us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload
-digest: sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2
+digest: sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db
 ```
 
 Produced by `./build.sh` on 2026-09-09 from a cold BuildKit cache, and

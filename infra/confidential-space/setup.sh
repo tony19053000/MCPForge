@@ -64,7 +64,7 @@ readonly ISSUER_URI="https://confidentialcomputing.googleapis.com"
 # reviewer from a clean clone. It is pinned by exact equality below; a prefix
 # match, a `matches()` or a `!=` here would convert hardware attestation into no
 # attestation at all, which is what this ticket's tests exist to prevent.
-readonly IMAGE_DIGEST="sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2"
+readonly IMAGE_DIGEST="sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db"
 
 # ── The attribute condition ─────────────────────────────────────────────────
 #

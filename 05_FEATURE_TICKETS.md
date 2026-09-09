@@ -550,7 +550,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** The score derives only from executed checks; a component with no evidence contributes zero rather than a default; Gemini is never asked for a score — asserted by the absence of any scoring prompt; weights match `02_ARCHITECTURE.md` §11 and sum to 100.
 **Tests.** Score computation unit tests including the missing-evidence case and the weight-sum assertion; integration run against the demo fixture; a test that the validator's verdict comes from exit codes, not model text.
 **Security.** Runs inside the secure executor with no outbound network.
-**Status.** `PENDING`
+**Status.** `DONE` — `PASS` on the third review round.
 
 ### F8-05 — Before/after demonstration
 **Purpose.** Show the difference the transformation makes, honestly.

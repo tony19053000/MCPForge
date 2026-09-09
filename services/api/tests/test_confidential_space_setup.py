@@ -615,7 +615,7 @@ def test_a_production_token_satisfies_the_condition(
         (
             "the digest with one character changed",
             ("submods", "container", "image_digest"),
-            "sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb3",
+            "sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1dc",
         ),
         (
             "an uppercase spelling of the pinned digest",
