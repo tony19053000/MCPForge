@@ -105,7 +105,7 @@ This is a real constraint, stated honestly in the product UI. MCPForge detects t
 | Vanilla JS, Vue, Svelte, Angular adapters | Future — architecture must allow, MVP must not claim |
 | Project upload (zip / drag-and-drop ingestion) | Future — MVP ingests via GitHub App or the bundled demo project only |
 | Non-JS backends in the analyzed repository | Future |
-| Hardware-attested confidential execution | Interface built in MVP; real attestation is Phase 8 and is marked blocked until real infrastructure exists |
+| Hardware-attested confidential execution | Interface and verification built in MVP (`F8-01`). Obtaining a real attestation is Phase 8 and stays blocked until real infrastructure exists. The supporting work — the Confidential Space workload image (`F8-02a`) and the workload-identity infrastructure (`F8-02b`) — is in scope for Phase 8; the product reports `DEVELOPMENT_ISOLATION` until all three pass |
 | ChatGPT MCP connector / hosted MCP server | Future scope, documented in `02_ARCHITECTURE.md` §Future |
 | Team accounts, org billing, RBAC | Future |
 | Automatic merge | Never — the developer merges |

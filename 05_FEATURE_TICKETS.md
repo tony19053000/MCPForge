@@ -502,13 +502,34 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 ### F8-02 — ConfidentialSpaceSecureExecutor
 **Purpose.** The production confidential execution path.
 **Files.** `services/api/src/mcpforge/execution/confidential_space.py`
-**Dependencies.** F8-01
+**Dependencies.** F8-01, F8-02a, F8-02b
 **Implementation.** Google Confidential Space implementation of `SecureExecutionProvider`, returning real attestation evidence.
 **Acceptance criteria.** Real attestation is obtained and verified before `HARDWARE_ATTESTED` is set; failure to attest falls back to refusing the job, not to claiming isolation it does not have.
 **Tests.** Integration test against real Confidential Space infrastructure. **These tests cannot be simulated** — a mocked attestation proves nothing about this ticket.
 **Security.** T7 control.
 **Note.** Requires real GCP infrastructure and credentials (blocker B-04). It is never marked done on a simulation.
 **Status.** `BLOCKED`
+
+### F8-02a — Confidential Space workload image
+**Purpose.** Produce the container image that actually runs inside Confidential Space, so that an image digest exists to pin and to attest. Without it there is nothing for `F8-01` to verify a digest against.
+**Files.** `infra/confidential-space/Dockerfile`, `infra/confidential-space/entrypoint.py`, `infra/confidential-space/build.sh`, `infra/confidential-space/README.md`, `services/api/tests/test_workload_image.py`
+**Dependencies.** F8-01
+**Implementation.** A minimal image containing the secure executor workload only — not the FastAPI service, not the web tier. Base image pinned by digest, non-root user, no shell entrypoint, no build secrets and no ADC file. `build.sh` builds reproducibly, pushes to `us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor`, and prints the resulting `sha256:` digest — the value pinned into `AttestationPolicy.image_digest`. The Confidential Space launch-policy labels are declared in the Dockerfile and documented line by line in the README.
+**Acceptance criteria.** The image builds from a clean checkout; the pushed digest is recorded in the README and is the value the deployment pins; the image contains no credential, no `.env` and no ADC file; the entrypoint refuses to start when required configuration is absent rather than starting with defaults.
+**Tests.** A build test; a layer-inspection test asserting no secret-shaped file and no `.env` is present in any layer; an entrypoint test for the missing-configuration refusal. All run against a locally built image and require no GCP.
+**Security.** The image *is* the attested artifact. Anything baked into it sits inside the trust boundary, so the secret-absence test is a T7 control, not hygiene.
+**Status.** `PENDING`
+
+### F8-02b — Confidential Space infrastructure and workload identity
+**Purpose.** Stand up the GCP resources that let an attested workload prove which image it is, so `F8-02` has real infrastructure to run against and B-04 can be cleared.
+**Files.** `infra/confidential-space/setup.sh`, `infra/confidential-space/policy.md`, `.env.example`
+**Dependencies.** F8-02a
+**Implementation.** A scripted, idempotent setup that enables `iam.googleapis.com` and `sts.googleapis.com`, creates the workload identity pool and an OIDC provider trusting the Confidential Space issuer, creates a dedicated workload service account with least privilege, and binds the pool to it under an attribute condition on image digest, hardware model and debug status. `policy.md` records every attribute condition in prose beside the claim it constrains. The script prints what it would change before changing it.
+**Acceptance criteria.** A second run makes no changes; the attribute condition pins the `F8-02a` digest and never a wildcard; the workload service account holds no role beyond those enumerated in `policy.md`; a debug-image token cannot satisfy the production condition; no credential is written into the repository and `.env.example` gains variable names with no values.
+**Tests.** An idempotency check (run twice, diff the resulting IAM policy); a consistency test asserting every attribute condition in the script appears in `policy.md` and vice versa. Live verification against real GCP is manual, and is recorded in the README with the date and the operator — it is not a CI test and is never simulated.
+**Security.** A permissive attribute condition silently converts hardware attestation into no attestation at all. The wildcard case is the specific thing these tests exist to prevent.
+**Note.** Requires the real GCP project and billing. `F8-02a` and `F8-02b` together are the work that clears blocker B-04. Until they and `F8-02` pass, the product continues to report `DEVELOPMENT_ISOLATION`.
+**Status.** `PENDING`
 
 ### F8-03 — Trust panel
 **Purpose.** Show the user the real security state, and never a flattering version of it.

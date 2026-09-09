@@ -91,7 +91,7 @@ Phases 8–9, tickets `F8-01` through `F9-05`, plus `F6-05` (GitHub webhook, nee
 | B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally (quota project `launchforge-tee`) | Closed |
 | B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
 | B-03 | ~~No GitHub App~~ — **resolved** | App 4797679 registered and installed on `tony19053000`, scoped to selected repositories. Verified live: contents=write, pull_requests=write, metadata=read, and nothing else | Closed |
-| B-04 | No GCP Confidential Space infrastructure | Ticket `F8-02` cannot be completed and is marked `BLOCKED`. **It will not be simulated or marked done.** Development isolation continues to work and is labelled honestly | Open — expected; Phase 8 |
+| B-04 | No GCP Confidential Space infrastructure | Ticket `F8-02` cannot be completed and is marked `BLOCKED`. **It will not be simulated or marked done.** Development isolation continues to work and is labelled honestly. The project owner has since created GCP project `mcpforge-aa5c2` with an Artifact Registry repository; the registry is still empty and no workload identity pool or Confidential VM exists, so the blocker stands. Clearing it is `F8-02a` (workload image) then `F8-02b` (workload identity), then `F8-02` | Open — narrowing; Phase 8 |
 
 None of these block Phase 1. Work continues on everything that can be built and tested without them.
 
