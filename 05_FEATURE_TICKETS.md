@@ -530,7 +530,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Tests.** An idempotency check (run twice, diff the resulting IAM policy); a consistency test asserting every attribute condition in the script appears in `policy.md` and vice versa. Live verification against real GCP is manual, and is recorded in the README with the date and the operator — it is not a CI test and is never simulated.
 **Security.** A permissive attribute condition silently converts hardware attestation into no attestation at all. The wildcard case is the specific thing these tests exist to prevent.
 **Note.** Requires the real GCP project and billing. `F8-02a` and `F8-02b` together are the work that clears blocker B-04. Until they and `F8-02` pass, the product continues to report `DEVELOPMENT_ISOLATION`.
-**Status.** `PENDING`
+**Status.** `DONE` — `PASS` on the second review round. The script is written and its plan verified against live GCP; **it has never been run with `--apply`**, so no pool, provider, service account or binding exists. Running it is the project owner's decision and is recorded in the README's live-verification table.
 
 ### F8-03 — Trust panel
 **Purpose.** Show the user the real security state, and never a flattering version of it.

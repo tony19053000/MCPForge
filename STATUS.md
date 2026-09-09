@@ -6,7 +6,7 @@
 
 ## Overall completion
 
-**84%** — Phase 8 in progress. `F8-01` and `F8-02a` complete, verified by `[REVIEWER / TESTER]` on rounds 4 and 7.
+**86%** — Phase 8 in progress. `F8-01`, `F8-02a` and `F8-02b` complete, verified by `[REVIEWER / TESTER]` on rounds 4, 7 and 2.
 
 ## Current phase
 
@@ -18,7 +18,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-None. Next intended task is `F8-02b` — Confidential Space infrastructure and workload identity.
+None. Next intended task is `F8-03` — the trust panel. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
 
 ---
 
@@ -71,6 +71,7 @@ None. Next intended task is `F8-02b` — Confidential Space infrastructure and w
 | F7-05 | Repository selector UI | PASS (round 10) |
 | F8-01 | Attestation evidence model | PASS (round 4) |
 | F8-02a | Confidential Space workload image | PASS (round 7) |
+| F8-02b | Confidential Space infrastructure and workload identity | PASS (round 2) — script written and plan-verified; never applied |
 
 ## In progress
 
@@ -131,7 +132,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1219 passing** — 222 web (Vitest/RTL), 997 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1286 passing** — 222 web (Vitest/RTL), 1064 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -870,6 +871,17 @@ commit dated 2016, a clone path containing spaces, a dirty tree, files back-date
 to 2001, a hostile `SOURCE_DATE_EPOCH` in the environment, `TZ=Pacific/Kiritimati`,
 a Turkish locale and a different umask.
 
+> **Annotation, added during `F8-02b`.** That digest is superseded. The image
+> contains `mcpforge/execution/attestation.py`, and correcting the
+> `google_service_accounts` claim there changed the image, so the current digest
+> is `sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2`
+> and is recorded in entry 0013. `sha256:9dffebfb…` is left in place above
+> because it is what `F8-02a` actually produced, reviewed and committed at
+> `07b3dab`, and the reproduction described in this paragraph was performed
+> against that value and no other. It was briefly overwritten here by a
+> repinning sweep during `F8-02b` — an append-only log edited in place, which
+> CLAUDE.md §7 forbids and which the reviewer caught.
+
 **Decisions made.**
 1. **Three causes were removed from the digest**, each found by a review round
    and none visible to "build it twice and compare", because in every case both
@@ -931,3 +943,90 @@ least-privilege workload service account, under an attribute condition pinning
 the image digest, hardware model and debug status. Then `F8-02`, which stays
 `BLOCKED` until real Confidential Space execution and attestation are verified
 against real infrastructure. It is never marked done on a simulation.
+
+---
+
+### 0013 — Phase 8: workload identity, and a claim name that did not exist
+
+**What was built.** `F8-02b`: `infra/confidential-space/setup.sh`, an idempotent
+plan-by-default script that creates the workload identity pool, an OIDC provider
+trusting `https://confidentialcomputing.googleapis.com`, the workload service
+account, its two project roles, and the pool-to-account binding;
+`infra/confidential-space/policy.md`, which records every attribute condition in
+prose beside the claim it constrains; `infra/confidential-space/setup_scan.py`, a
+shared parser and CEL-subset evaluator used by both the script's self-check and
+the tests; and `services/api/tests/test_confidential_space_setup.py` with
+`fake_gcloud.py` (55 tests).
+
+**The script has never been applied.** A live plan run against real GCP reports
+`6 change(s) would be made. Nothing was changed.` There is no pool, no provider,
+no service account, no binding and no VM, and the Artifact Registry repository is
+empty. The README's live-verification table records that, and records it as
+*not run* rather than as pending.
+
+**The attribute condition**, which is the security core:
+
+```
+assertion.swname == 'CONFIDENTIAL_SPACE'
+&& assertion.submods.container.image_digest == 'sha256:31ed4925…'
+&& assertion.hwmodel in ['GCP_AMD_SEV', 'GCP_AMD_SEV_ES', 'GCP_AMD_SEV_SNP', 'GCP_INTEL_TDX']
+&& assertion.dbgstat == 'disabled-since-boot'
+&& 'STABLE' in assertion.submods.confidential_space.support_attributes
+&& 'mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com' in assertion.google_service_accounts
+```
+
+The binding narrows to `attribute.image_digest/<digest>`, not to the whole pool,
+so only a workload running that exact image can assume the identity.
+
+**Decisions made.**
+1. **The claim is `google_service_accounts` — plural, an array of strings.** The
+   first version of this condition, and `F8-01`'s verifier alongside it, used a
+   singular `google_service_account`. **No such claim exists in a Confidential
+   Space token.** A CEL conjunction over an absent field errors and therefore
+   denies, so the condition was not permissive — it was *unsatisfiable*, and the
+   federation could never have authorised a genuine token. `F8-01` would have
+   rejected every real token for a missing required claim. Every test passed
+   throughout, because the token fixtures modelled the same wrong shape: a
+   self-consistent fiction, which is the one failure mode a conformance check
+   against one's own fixtures cannot detect. It was found by the reviewer reading
+   Google's documentation, not by running anything.
+2. **`F8-01` was corrected inside this ticket rather than deferred.** Shipping a
+   correct condition beside a verifier that rejects every genuine token would
+   have left neither half exercisable while the record called the verifier
+   `DONE`. `03_SECURITY_ACCESS.md` moved in the same commit.
+3. **`roles/logging.logWriter` is not granted.** The draft granted it and
+   justified it by saying Confidential Space writes the workload's output to
+   Cloud Logging — false while the image sets `log_redirect=never`. Verified
+   against Google's documentation: redirection needs both operator metadata and
+   that role, and the launch policy overrides the metadata. The absence is
+   documented with the trigger that would make it reconsiderable.
+
+**The digest moved, correctly.** The image contains
+`mcpforge/execution/attestation.py`, so the claim-name fix changed it:
+`sha256:9dffebfb…` → `sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2`.
+`test_the_readme_records_the_digest_that_is_actually_built` caught it, which is
+what that test exists for. The reviewer reproduced the new value from a clean
+copy on a pruned BuildKit cache, and the 64-test reproducibility matrix passes
+against it. Entry 0012 keeps `9dffebfb…` with an annotation, because that is what
+`F8-02a` produced and reviewed.
+
+**Review gate outcome.** `PASS` on the second round. Round 1 returned `FAIL` with
+the claim-name defect above; round 2 confirmed the fix under a 20-mutation
+battery in which reverting the clause to the singular form goes red, so the bug
+cannot silently return. Round 2's own finding was that a repinning sweep had
+overwritten entry 0012's digest in place — an append-only log edited in place,
+which CLAUDE.md §7 forbids. Restored and annotated.
+
+**What NOT to change accidentally.** The plural claim name and the membership
+form in both `setup.sh` and `attestation.py`. The narrowing of the principal set
+to `attribute.image_digest`. The absence of `roles/logging.logWriter`. The
+plan-by-default posture: the script must never mutate without `--apply`.
+
+**Open issues.** B-04 stands. Clearing it now needs three owner actions —
+`build.sh --push`, `setup.sh --apply`, and booting a Confidential VM — then
+`F8-02`, which is never marked done on a simulation. Nothing has been pushed, no
+GCP resource has been created beyond `iam`, `sts` and `iamcredentials` being
+enabled, and the product reports `DEVELOPMENT_ISOLATION`.
+
+**Next intended task.** `F8-03` — the trust panel. It renders server state only,
+and that state is `DEVELOPMENT_ISOLATION`.

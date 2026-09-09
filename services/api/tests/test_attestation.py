@@ -132,7 +132,7 @@ def make_attestation_token(private_pem: str) -> MakeAttestationToken:
             "us-central1-a/instances/mcpforge-worker-1",
             "iat": now - issued_ago,
             "exp": now + expires_in,
-            "google_service_account": service_account,
+            "google_service_accounts": [service_account],
             "hwmodel": hardware_model,
             "swname": software_name,
             "dbgstat": debug_status,
@@ -194,7 +194,7 @@ def base_claims() -> dict[str, Any]:
         "sub": "//compute.googleapis.com/instances/mcpforge-worker-1",
         "iat": now,
         "exp": now + 3600,
-        "google_service_account": WORKLOAD_SA,
+        "google_service_accounts": [WORKLOAD_SA],
         "hwmodel": "GCP_AMD_SEV",
         "swname": "CONFIDENTIAL_SPACE",
         "dbgstat": "disabled-since-boot",
@@ -490,7 +490,10 @@ ADVERSARIAL_CLAIMS: list[dict[str, Any]] = [
     {"aud": [AUDIENCE, "someone-else"]},
     {"aud": [AUDIENCE, AUDIENCE]},
     {"aud": []},
-    {"google_service_account": 42},
+    {"google_service_accounts": 42},
+    {"google_service_accounts": [42]},
+    {"google_service_accounts": []},
+    {"google_service_accounts": WORKLOAD_SA},
     {"hwmodel": None},
     {"swname": {"a": 1}},
     {"dbgstat": ["disabled-since-boot"]},
@@ -511,7 +514,7 @@ ADVERSARIAL_CLAIMS: list[dict[str, Any]] = [
     {"submods": {"container": {"image_digest": f"{IMAGE_DIGEST}\n", "image_reference": "r"}}},
     {"hwmodel": " GCP_AMD_SEV "},
     {"dbgstat": "  disabled-since-boot  "},
-    {"google_service_account": f" {WORKLOAD_SA} "},
+    {"google_service_accounts": [f" {WORKLOAD_SA} "]},
     {"swname": "CONFIDENTIAL_SPACE\n"},
 ]
 
@@ -594,7 +597,7 @@ MATRIX_CLAIMS = [
     "nbf",
     "iat",
     "jti",
-    "google_service_account",
+    "google_service_accounts",
     "hwmodel",
     "swname",
     "dbgstat",
@@ -978,6 +981,64 @@ def test_a_different_workload_identity_is_rejected(
     assert outcome.failure is AttestationFailure.UNEXPECTED_WORKLOAD
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(WORKLOAD_SA, id="a bare string, the shape this code used to expect"),
+        pytest.param([], id="an empty array"),
+        pytest.param([42], id="an array holding a non-string"),
+        pytest.param([WORKLOAD_SA, 42], id="an array with one good and one bad entry"),
+        pytest.param([""], id="an array holding an empty string"),
+        pytest.param(["   "], id="an array holding whitespace"),
+        pytest.param({"0": WORKLOAD_SA}, id="an object keyed like an array"),
+        pytest.param(None, id="null"),
+    ],
+)
+def test_the_service_account_claim_must_be_an_array_of_strings(
+    value: object,
+    policy: AttestationPolicy,
+    resolver: _Resolver,
+    make_attestation_token: MakeAttestationToken,
+) -> None:
+    """`google_service_accounts` is plural and an array — anything else is missing.
+
+    Named by `_required_service_accounts`'s docstring, and the reason this test
+    exists: the verifier previously read a singular `google_service_account`
+    string, which no genuine Confidential Space token carries. It would have
+    rejected every real token for a missing claim, and the `F8-02b` attribute
+    condition mirrored the same error. Every test passed, because the token
+    fixtures modelled the same wrong shape — the failure mode a conformance
+    check against one's own fixtures cannot detect.
+
+    The bare-string case is first deliberately: it is the old shape, and it must
+    now be refused rather than quietly accepted.
+    """
+
+    token = make_attestation_token(overrides={"google_service_accounts": value})
+    outcome = verify(token, policy, resolver)
+    assert outcome.trust_level is TrustLevel.DEVELOPMENT_ISOLATION
+    assert outcome.evidence is None
+    assert outcome.failure is AttestationFailure.MISSING_CLAIM
+
+
+def test_the_expected_identity_may_be_one_of_several_attested_accounts(
+    policy: AttestationPolicy, resolver: _Resolver, make_attestation_token: MakeAttestationToken
+) -> None:
+    """The claim is an array, so membership is the question, not equality.
+
+    Without this, `_required_service_accounts` could return only the first entry
+    and every other test would still pass.
+    """
+
+    token = make_attestation_token(
+        overrides={"google_service_accounts": ["other@example.com", WORKLOAD_SA]}
+    )
+    outcome = verify(token, policy, resolver)
+    assert outcome.trust_level is TrustLevel.HARDWARE_ATTESTED
+    assert outcome.evidence is not None
+    assert outcome.evidence.workload_service_account == WORKLOAD_SA
+
+
 # -- rejection: platform ----------------------------------------------------
 
 
@@ -1046,7 +1107,7 @@ def test_a_missing_registered_claim_is_rejected(
 
 
 @pytest.mark.parametrize(
-    "claim", ["google_service_account", "hwmodel", "swname", "dbgstat", "submods"]
+    "claim", ["google_service_accounts", "hwmodel", "swname", "dbgstat", "submods"]
 )
 def test_a_missing_attestation_claim_is_rejected(
     policy: AttestationPolicy,

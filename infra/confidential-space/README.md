@@ -36,7 +36,7 @@ token and running a repository job is `F8-02`, which is `BLOCKED` on `B-04`.
 
 ```
 image:  us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload
-digest: sha256:9dffebfbde81d889a4e93b327bcc25e2b65bf5670f1e50408e2bee803fb3b7d3
+digest: sha256:31ed4925d78c88080870b5f0846956833a7ad5dd8f9f387997f423c71c5f1eb2
 ```
 
 Produced by `./build.sh` on 2026-09-09 from a cold BuildKit cache, and
@@ -566,3 +566,46 @@ fails if the run reports any skip at all.
   ordinary Docker only, which exercises the entrypoint but not the launch
   policy: the labels are asserted to be *present and correct on the image*, and
   their *enforcement* is Confidential Space's, which we have not observed.
+
+---
+
+## Live verification record — `F8-02b`
+
+The setup in `setup.sh` has **not been run against Google Cloud.** Nothing below
+is filled in, because filling it in before a run is how a simulation becomes a
+claim.
+
+Live verification is manual and is recorded here by the person who ran it. It is
+deliberately not a CI test: a test that talks to real infrastructure either
+becomes a mock, or fails for everyone without credentials, and both outcomes
+teach the reader something false.
+
+| What | Value |
+|---|---|
+| Date of run | *not run* |
+| Operator | *not run* |
+| `setup.sh --apply` exit status | *not run* |
+| Second run reported no changes | *not run* |
+| Workload identity pool id | *not created* |
+| OIDC provider id | *not created* |
+| Workload service account | *not created* |
+| Attribute condition as live on the provider | *not created* |
+| `setup.sh --verify` output | *not run* |
+
+**What is true today**, stated so that nothing here is mistaken for progress:
+
+- No workload identity pool, OIDC provider, service account or IAM binding
+  exists in `mcpforge-aa5c2`. `setup.sh` with no arguments plans; it changes
+  nothing without `--apply`.
+- The image built by `F8-02a` has never been pushed. The registry is empty and
+  the digest pinned in the attribute condition is a local build's digest.
+- No Confidential Space VM has ever run. No attestation token has been obtained
+  by anything, from anywhere.
+- Therefore `F8-02` remains `BLOCKED` on B-04 and the product reports
+  `DEVELOPMENT_ISOLATION`. That is the honest state, not a placeholder for a
+  better one.
+
+Filling this table in is not what completes `F8-02`. `F8-02` is complete when a
+real Confidential Space workload obtains a real token that
+`verify_attestation_token` accepts against this attribute condition — and it is
+never marked done on a simulation.

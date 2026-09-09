@@ -498,7 +498,7 @@ def _evidence_from_claims(
     hardware_model = _required_str(claims, "hwmodel")
     software_name = _required_str(claims, "swname")
     debug_status = _required_str(claims, "dbgstat")
-    service_account = _required_str(claims, "google_service_account")
+    service_accounts = _required_service_accounts(claims)
 
     container = claims.get("submods", {})
     container = container.get("container") if isinstance(container, dict) else None
@@ -525,10 +525,17 @@ def _evidence_from_claims(
             AttestationFailure.DEBUG_MODE_ENABLED,
             f"Debug status {debug_status!r} is not {policy.required_debug_status}",
         )
-    if service_account != policy.workload_service_account:
+    # Membership, not equality. The claim is `google_service_accounts` — plural,
+    # and an array of strings, per Google's Confidential Space token-claims
+    # reference. An earlier version read a singular `google_service_account`
+    # string, which no real token carries: the verifier would have rejected
+    # every genuine token for a missing required claim, and the F8-02b attribute
+    # condition mirrored the same mistake. Both were self-consistent with their
+    # own fixtures, which is why the tests passed.
+    if policy.workload_service_account not in service_accounts:
         raise _RejectedError(
             AttestationFailure.UNEXPECTED_WORKLOAD,
-            "Token workload service account is not the expected workload identity",
+            "Token workload service accounts do not include the expected workload identity",
         )
     # Exact match against a canonical `sha256:<64 lowercase hex>`. The policy side
     # is normalised because a developer writes it; the token side is not
@@ -557,7 +564,7 @@ def _evidence_from_claims(
         subject=subject,
         image_digest=image_digest,
         image_reference=image_reference,
-        workload_service_account=service_account,
+        workload_service_account=policy.workload_service_account,
         hardware_model=hardware_model,
         software_name=software_name,
         debug_status=debug_status,
@@ -597,6 +604,34 @@ def _single_audience(claims: dict[str, Any]) -> str:
             AttestationFailure.WRONG_AUDIENCE, "Token audience claim is missing or not a string"
         )
     return audience
+
+
+def _required_service_accounts(claims: dict[str, Any]) -> tuple[str, ...]:
+    """The `google_service_accounts` claim: a non-empty array of non-empty strings.
+
+    Plural and an array, per Google's Confidential Space token-claims reference —
+    "The validated service accounts that are running the Confidential Space
+    workload." Values are returned exactly as they arrived, for the same reason
+    `_required_str` strips nothing.
+
+    Anything else is a missing claim, so a token carrying a bare string, an empty
+    array, or a list with a non-string element is rejected rather than coerced.
+    `test_the_service_account_claim_must_be_an_array_of_strings` fails if that
+    stops holding.
+    """
+    value = claims.get("google_service_accounts")
+    if not isinstance(value, list) or not value:
+        raise _RejectedError(
+            AttestationFailure.MISSING_CLAIM,
+            "Token carries no google_service_accounts array",
+        )
+    accounts = tuple(item for item in value if isinstance(item, str) and item.strip())
+    if len(accounts) != len(value):
+        raise _RejectedError(
+            AttestationFailure.MISSING_CLAIM,
+            "google_service_accounts contains a value that is not a non-empty string",
+        )
+    return accounts
 
 
 def _required_str(claims: dict[str, Any], name: str) -> str:
