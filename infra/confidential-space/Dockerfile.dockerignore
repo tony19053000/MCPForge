@@ -1,0 +1,20 @@
+# Build context allowlist for the Confidential Space workload image.
+#
+# The context is the repository root, which contains `.env`, `.env.local`, ADC
+# files under a developer's home if they ever land here, and the whole web tier.
+# None of that may reach the daemon, so the rule is: exclude everything, then
+# re-include exactly the paths the Dockerfile COPYs. A new COPY that forgets to
+# add its path here fails the build loudly instead of silently shipping.
+*
+
+!infra/confidential-space/entrypoint.py
+!infra/confidential-space/requirements.txt
+!services/api/src/mcpforge/__init__.py
+!services/api/src/mcpforge/logging.py
+!services/api/src/mcpforge/execution
+
+# Never, under any re-inclusion above.
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*

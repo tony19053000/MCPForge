@@ -6,7 +6,7 @@
 
 ## Overall completion
 
-**82%** — Phase 8 in progress. `F8-01` complete, verified by `[REVIEWER / TESTER]` on round 4.
+**84%** — Phase 8 in progress. `F8-01` and `F8-02a` complete, verified by `[REVIEWER / TESTER]` on rounds 4 and 7.
 
 ## Current phase
 
@@ -18,7 +18,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-None. Next intended task is `F8-03` — the trust panel.
+None. Next intended task is `F8-02b` — Confidential Space infrastructure and workload identity.
 
 ---
 
@@ -70,6 +70,7 @@ None. Next intended task is `F8-03` — the trust panel.
 | F7-04 | Agent-origin activity labelling | PASS (round 10) |
 | F7-05 | Repository selector UI | PASS (round 10) |
 | F8-01 | Attestation evidence model | PASS (round 4) |
+| F8-02a | Confidential Space workload image | PASS (round 7) |
 
 ## In progress
 
@@ -130,7 +131,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1155 passing** — 222 web (Vitest/RTL), 933 API (pytest), 3 skipped (2 web, 1 API). The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1219 passing** — 222 web (Vitest/RTL), 997 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -850,3 +851,83 @@ documented as outside the enumerated matrix.
 
 **Next intended task.** `F8-03` — the trust panel. It renders server state only,
 and for now that state is `DEVELOPMENT_ISOLATION`.
+
+---
+
+### 0012 — Phase 8: the workload image, and knowing when to stop hardening
+
+**What was built.** `F8-02a`, the Confidential Space workload image, in
+`infra/confidential-space/`: a `Dockerfile` with the base pinned by digest, a
+non-root user and a hash-pinned dependency closure; `entrypoint.py`, which
+performs preflight and refuses to start without required configuration;
+`build.sh`, which builds reproducibly and prints the digest; `dockerfile_scan.py`,
+a single shared Dockerfile parser; and `services/api/tests/test_workload_image.py`
+(64 tests).
+
+**The digest is the deliverable, and it is `sha256:9dffebfb…`** — reproduced by
+the reviewer from a clean clone on a cold builder, and unchanged under an empty
+commit dated 2016, a clone path containing spaces, a dirty tree, files back-dated
+to 2001, a hostile `SOURCE_DATE_EPOCH` in the environment, `TZ=Pacific/Kiritimati`,
+a Turkish locale and a different umask.
+
+**Decisions made.**
+1. **Three causes were removed from the digest**, each found by a review round
+   and none visible to "build it twice and compare", because in every case both
+   builds shared the thing that varied: `COPY`-preserved source mtimes; the
+   commit clock (`SOURCE_DATE_EPOCH` was `git log -1 --pretty=%ct`, so a single
+   empty commit changed the digest — this ticket's own landing commit would have
+   invalidated the pin it exists to produce); and a stale BuildKit cache, which
+   had already put a wrong digest into the README once.
+2. **`allow_cmd_override=false`** is the load-bearing launch-policy label.
+   Without it an operator keeps the attested digest and runs a different command
+   inside it, so the attestation would verify while proving nothing about
+   behaviour.
+3. **One shared Dockerfile parser.** Two implementations of one rule drifted in
+   opposite directions — Python joined continuations with a space, the shell
+   `sed` with nothing; the shell grep was case-sensitive, the Python list was
+   not — and a lowercase credential name split mid-token across a continuation
+   escaped both. `dockerfile_scan.py` is now executed by `build.sh` and loaded
+   by the test suite.
+4. **The hardening was stopped deliberately, at the project owner's direction.**
+   Rounds 4-6 hardened the Dockerfile *text scanner* against an attacker who, by
+   assumption, can edit the tests too. That is defence in depth, not the control.
+   The controls that carry the guarantee are the pinned reproducible digest, the
+   layer-content scan that reads every layer's real bytes, and `F8-01`'s
+   verification — a tampered image yields a different digest and fails
+   attestation whatever a Python test noticed.
+
+**Review gate outcome.** `PASS` on the seventh round. Rounds 1-6 returned `FAIL`
+with 4, 4, 2, 3, 3 and 4 findings. Two were real and serious: a digest that moved
+on unrelated commits, and a credential escape that put an API key inside the
+attested image with the whole suite green. The rest were a single recurring
+class — **a check matching text near a property rather than at the property** —
+which appeared in three consecutive rounds and twice inside its own fixes. The
+canonical example: `assert "--require-hashes" in dockerfile` was satisfied by the
+comment explaining `--require-hashes`, so deleting the flag from the install
+command left the suite green.
+
+**What NOT to change accidentally.** The constant `SOURCE_DATE_EPOCH=0`, set and
+never read. `--no-cache` on both builds whose digest can be pinned — removing it
+silently re-vacuums the two reproducibility tests. The single shared parser; do
+not reintroduce a second keyword list. `allow_cmd_override=false`.
+
+**Stated bound, not a defect.** The Dockerfile text scanner cannot follow a
+variable-constructed name. Recorded in `dockerfile_scan.py` and
+`03_SECURITY_ACCESS.md` in the same disclosure style as the AST sweeps.
+
+**Open issues.** The image is **not pushed**; the registry is empty and the
+recorded digest is local, not registry-confirmed. Confidential Space has never
+launched this image, so the launch-policy labels are asserted present and correct
+on the artefact, not observed being enforced. The image obtains no attestation
+token and runs no repository job.
+
+**GCP state.** Project `mcpforge-aa5c2` is canonical. `iam`, `sts` and
+`iamcredentials` were enabled by hand; `F8-02b` must still declare them so a
+fresh project reproduces. No workload identity pool, no workload service account,
+no Confidential VM, no image in the registry.
+
+**Next intended task.** `F8-02b` — the workload identity pool, OIDC provider and
+least-privilege workload service account, under an attribute condition pinning
+the image digest, hardware model and debug status. Then `F8-02`, which stays
+`BLOCKED` until real Confidential Space execution and attestation are verified
+against real infrastructure. It is never marked done on a simulation.

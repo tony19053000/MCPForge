@@ -20,7 +20,7 @@
     "build": "npm run build --workspace=apps/web",
     "format": "cd services/api && uv run ruff format .",
     "api:typecheck": "cd services/api && uv run mypy",
-    "api:lint": "cd services/api && uv run ruff check . && uv run ruff format --check .",
+    "api:lint": "cd services/api && uv run ruff check . && uv run ruff format --check . && uv run ruff check --config pyproject.toml ../../infra/confidential-space && uv run ruff format --check --config pyproject.toml ../../infra/confidential-space",
     "api:test": "cd services/api && uv run pytest -q",
     "fixture:typecheck": "npm run typecheck --workspace=fixtures/demo-hotel-app",
     "fixture:build": "npm run build --workspace=fixtures/demo-hotel-app"

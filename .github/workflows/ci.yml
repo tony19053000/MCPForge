@@ -165,6 +165,37 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest -q
 
+  workload-image:
+    name: Confidential Space workload image (F8-02a)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      # These tests build a real image and inspect its real layers. Locally
+      # they skip when Docker is unavailable, so a developer without Docker is
+      # not shown a red bar. A skip that is green forever proves nothing, which
+      # is why CI sets this: here, "cannot build the image" is a failure.
+      - name: Build and inspect the workload image
+        env:
+          MCPFORGE_IMAGE_TESTS_REQUIRED: "1"
+        run: uv run pytest tests/test_workload_image.py -q
+      - name: The workload image tests did not silently skip
+        env:
+          MCPFORGE_IMAGE_TESTS_REQUIRED: "1"
+        run: |
+          uv run pytest tests/test_workload_image.py -q --no-header -rs \
+            | tee /tmp/workload.txt
+          if grep -qiE '[0-9]+ skipped' /tmp/workload.txt; then
+            echo "::error::a workload image test skipped while it was required"
+            exit 1
+          fi
+
   secrets:
     name: No credentials in the tree
     runs-on: ubuntu-latest

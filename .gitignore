@@ -44,6 +44,10 @@ next-env.d.ts
 dist/
 build/
 
+# Confidential Space workload image build artefacts. The OCI layout is
+# ~50 MB and is reproducible from the checkout, so it is never committed.
+infra/confidential-space/.build/
+
 # Python
 __pycache__/
 *.py[cod]

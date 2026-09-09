@@ -53,6 +53,130 @@ The tests therefore assert not merely that verification returns an outcome, but 
 
 An under-specified policy — no audience, no expected digest, an empty allowed-hardware set — raises at construction rather than verifying permissively.
 
+**The image is the artefact the attestation is about (F8-02a).** A hardware
+attestation states that one exact image ran on genuine confidential hardware; it
+says nothing about whether that image should be trusted. Everything baked in
+therefore sits inside the trust boundary. `infra/confidential-space/` builds a
+minimal image holding the secure executor only, from a digest-pinned base, with a
+hash-pinned dependency closure, no build secret, no `.env` and no ADC file,
+running as a fixed non-root uid under an exec-form entrypoint that **refuses to
+start** when required configuration is absent rather than substituting a default.
+`tee.launch_policy.allow_cmd_override` is `false`, so an operator cannot keep the
+attested digest while running something else inside it, and `allow_env_override`
+is a two-name allowlist.
+
+**"No build secret" is asserted against the image, not against the Dockerfile.**
+Six review rounds on this ticket failed the same way — a check matching text
+near a property rather than at the property — and two of them produced a working
+escape: a `GEMINI_API_KEY` in the attested image's config with the whole suite
+green, which is a credential inside the trust boundary. A comment line ending in
+`\` deleted the following `ENV` from both guards while Docker executed it; a
+continuation split mid-token was reassembled by Docker and not by Python, whose
+join used a space; a lowercase `env` beat a case-sensitive `grep`; and a bare
+`GEMINI_KEY=` beat a keyword list holding only `API_KEY` and `PRIVATE_KEY`. The
+cause in every case was two implementations of one rule that could drift.
+`infra/confidential-space/dockerfile_scan.py` is now the only parser and the only
+keyword list, shared by `build.sh` and the test suite, parsing in Docker's own
+order and refusing rather than approximating an `escape` parser directive; each
+measured payload is a parametrised case of
+`test_a_measured_build_secret_escape_is_reported`. It is **defence in depth**.
+The controls read the artefact the digest actually covers:
+`test_the_image_config_declares_exactly_the_documented_environment` asserts
+`Config.Env` exactly, name and value, so an environment variable that exists is
+documented or the test fails however it was spelled; and
+`test_the_final_stage_ran_exactly_the_documented_instructions` asserts the final
+stage's recorded instruction history exactly. A keyword scan of that history was
+tried and rejected — the description label contains "token" and the
+user-creation `RUN` writes to `/etc/passwd`, and false positives are how a
+keyword list gets shortened. Bound: BuildKit records only the final stage's
+instructions plus the base image's, and does not record `--mount=type=secret` in
+`created_by` at all; the builder stage and secret mounts are covered by the layer
+scan and by the text scan above.
+
+**The dependency closure is asserted positively.** Counting install spellings
+cannot be made correct: the regex that did it missed `pip --no-cache-dir
+install` — the flag order this Dockerfile uses — `pip -q install`, `pip3.12
+install` and `python -mpip install`, so a second unpinned install passed an
+"exactly one install" assertion, and `$PIP install` defeats any such regex.
+`test_the_installed_distributions_are_exactly_the_pinned_closure` instead reads
+every `.dist-info` in the image's `site-packages` and requires the set to equal
+`requirements.txt` in both directions, which holds however the install was
+spelled.
+
+The absence of credential material is a **T7 control, not hygiene**, and is
+tested as one: `test_no_layer_contains_credential_material` opens every layer
+blob of the built image and reads its tar members, because a file deleted in a
+later layer is still present in the layer that added it and is still covered by
+the digest — verified in review with a planted `id_rsa` removed by a later
+`RUN`. The scan is proved able to fail by a companion test that builds a derived
+image containing a planted `.env` and requires the same function to report it.
+
+**What is demonstrated, and its bound.** Like the AST sweeps above, this is a
+name-based check: it matches *paths*, and reads content only to decide whether a
+path match may be exempted. It therefore catches a credential-shaped name in any
+layer, including one a later layer deletes, and does **not** catch a credential
+renamed to something innocuous, embedded in a nested archive, or reached through
+a symlink whose own name is unremarkable. All three were demonstrated by the
+reviewer and are inherent to a name scan.
+
+Its one exemption is the base image's published CA trust store, and the first
+version of that exemption was a hole rather than a caveat: exempting on location
+alone made `etc/ssl/certs/` a hiding place, so an ADC file, a `.env`, an `id_rsa`
+and a `.pem` containing a private key all reported clean inside the control meant
+to find exactly those. A member is now exempt only if its name is
+certificate-shaped **and** its location is a trust-store path **and**, for a
+regular file, a PEM certificate block appears in its first 64 KiB and a PEM
+private-key block appears **nowhere in it at all** — an unreadable file is never
+exempted, and a symlink is exempt only if its target satisfies the same rules.
+That asymmetry is not an implementation detail: both checks once used the same
+64 KiB prefix, and two genuinely exempted members are larger than it, so a key
+appended past the cap to a concatenated CA bundle was exempted. The private-key
+search is now streamed over the whole member. `test_the_only_exempted_files_are_real_public_certificates`
+asserts all of that on the real image, and
+`test_a_credential_hidden_in_the_trust_store_is_still_caught` plants each of the
+above in each exempted directory and fails unless every one is reported.
+
+**Reproducibility is part of the control, not an aside.** A pinned digest that a
+rebuild cannot reproduce cannot distinguish a legitimate rebuild from a
+substituted image. **Three** causes were found across three review rounds, and
+none of them was visible to "build it twice and compare", because in each case
+both builds shared the thing that varied:
+
+1. **Source mtimes.** `COPY` preserves them and `rewrite-timestamp` only clamps
+   timestamps newer than `SOURCE_DATE_EPOCH`, so a fresh clone and a long-lived
+   working tree disagreed on a layer whose contents were byte-identical. The
+   Dockerfile now normalises every copied mtime to `@0`
+   (`test_every_workload_file_has_a_normalised_mtime`,
+   `test_the_digest_does_not_depend_on_source_file_mtimes`).
+2. **The commit clock.** `SOURCE_DATE_EPOCH` was `git log -1 --pretty=%ct`, so a
+   single **empty commit** changed the digest — meaning the commit that lands
+   this work would have invalidated the digest it produces. It is now the
+   constant `0`, and `build.sh` **sets** it rather than reading it, so an
+   inherited environment value cannot put a caller's clock back in
+   (`test_the_digest_does_not_depend_on_the_commit_timestamp`, which builds a
+   real repository at two HEADs, and `test_an_inherited_source_date_epoch_is_ignored`,
+   which is needed separately because the first test passes if the script
+   honours an inherited value — both of its builds would inherit the same one).
+3. **The build cache.** A stale BuildKit cache made `build.sh` print a digest
+   for an image the current Dockerfile does not produce, and that digest reached
+   the README. The canonical build now runs with a cold cache; a cache is a
+   performance optimisation and the printed digest is a security assertion, so
+   they no longer share a code path
+   (`test_every_pinnable_build_runs_with_a_cold_cache`, which asserts
+   `--no-cache` on both builds whose digest can be pinned). This cause is not
+   independent of the other two: with the cache live, the tests for causes 1
+   and 2 read a pre-fix exported layer and pass over the defect they exist to
+   catch, so the cold cache is what makes those assertions mean anything.
+
+The recorded digest in the README is itself asserted against the built one
+(`test_the_readme_records_the_digest_that_is_actually_built`).
+
+**Nothing has been pushed and no digest is pinned.** The image obtains no
+attestation token, runs no repository job, and has never been launched by
+Confidential Space; the labels are asserted present and correct on the image, and
+their enforcement is Confidential Space's and has not been observed. Blocker B-04
+stands.
+
 `attestation.py` verifies a token; it never obtains one. Acquiring a real Confidential Space token is `F8-02`, which is `BLOCKED` on blocker B-04 and is not simulated. Nothing in the backend calls the verifier yet, so nothing reports `HARDWARE_ATTESTED`; a test asserts that too. Verification also cannot prove a token was minted for *this* process rather than replayed — the audience nonce is the mechanism, and binding it is `F8-02`'s job.
 
 The "exactly one producer" rule is enforced by an AST sweep over every backend module, matching the attribute, the bare name and the string literal. Like the approval sweep in §6 of `02_ARCHITECTURE.md`, it matches on names: it catches straightforwardly-written code and does not defeat deliberate indirection such as `getattr(TrustLevel, name)`. The guarantee is that sweep **plus** the behavioural tests that every rejection path returns `DEVELOPMENT_ISOLATION`.

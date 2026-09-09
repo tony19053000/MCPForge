@@ -76,6 +76,13 @@ MCPForge/
 │       │   └── models/        Pydantic schemas (source of truth)
 │       ├── scripts/         manual live checks; never run in CI
 │       └── tests/           pytest, plus structure.py for AST-based structural rules
+├── infra/
+│   └── confidential-space/     the attested workload image (F8-02a)
+│       ├── Dockerfile          digest-pinned base, non-root, launch-policy labels
+│       ├── entrypoint.py       preflight; refuses to start on absent configuration
+│       ├── requirements.txt    hash-pinned dependency closure for the image
+│       ├── dockerfile_scan.py  the one Dockerfile parser + build-secret list, shared
+│       └── build.sh            reproducible build; --push verifies the registry digest
 ├── fixtures/
 │   └── demo-hotel-app/         real Next.js app used as the demo project and test fixture
 ├── docs/                       supplementary design notes
@@ -286,6 +293,51 @@ Implementations:
 - `ConfidentialSpaceSecureExecutor` — Google Confidential Space target. Phase 8. Returns real attestation evidence or nothing.
 
 **Trust levels are an enum with exactly one meaning each:** `DEVELOPMENT_ISOLATION` and `HARDWARE_ATTESTED`. `HARDWARE_ATTESTED` is only ever set by code that has actually verified an attestation token. There is no path that sets it optimistically, and the UI renders the enum, not a boolean.
+
+**The attested artefact (F8-02a).** `infra/confidential-space/` builds the
+container image that will run inside Confidential Space. It carries the secure
+executor, the two `mcpforge` modules it imports, and three third-party packages
+— and none of the rest of the backend: not FastAPI, not the agents, not
+`google-genai`, not the GitHub client, not the web tier
+(`test_the_image_carries_the_executor_and_not_the_service`). The reason for that
+restraint is that the image digest is what `AttestationPolicy.image_digest`
+pins, so everything inside it is inside the trust boundary.
+
+Each property below names the test that fails if it stops holding, which is the
+convention `F8-01`'s review rounds arrived at and this ticket's rounds
+reinforced. The base is pinned by digest in both build stages
+(`test_every_base_image_is_pinned_by_digest`); the dependency closure is
+installed with `--require-hashes --no-deps` from a file where every pin carries
+a hash (`test_the_dependency_closure_is_hash_pinned`); the process runs as a
+fixed non-root uid (`test_the_image_runs_as_a_fixed_non_root_user`) under an
+exec-form entrypoint with no shell
+(`test_the_image_entrypoint_is_exec_form_with_no_shell`); and the Confidential
+Space launch-policy labels are declared in the Dockerfile, asserted value for
+value against the built image
+(`test_the_launch_policy_labels_are_exactly_as_documented`) and explained line
+by line in that directory's README
+(`test_every_launch_policy_label_is_explained_in_the_readme`).
+
+Two properties are asserted against the built image rather than against the
+Dockerfile, because six review rounds showed that parsing the recipe is not a
+control: `Config.Env` is asserted exactly, name and value
+(`test_the_image_config_declares_exactly_the_documented_environment`), the final
+stage's recorded instruction history is asserted exactly
+(`test_the_final_stage_ran_exactly_the_documented_instructions`), and the
+installed distributions are asserted to equal the hash-pinned closure in both
+directions (`test_the_installed_distributions_are_exactly_the_pinned_closure`).
+`dockerfile_scan.py` holds the only Dockerfile parser and the only build-secret
+keyword list, shared by `build.sh` and the test suite so the two cannot drift;
+it is defence in depth ahead of those three.
+
+`build.sh` builds reproducibly — the digest is a function of content alone, with
+three separate clock and cache leaks found and closed in review — and prints the
+digest. `--push` **would** publish and then verify that the registry reports the
+same digest; that path has never been run.
+`services/api/tests/test_workload_image.py` builds the real image and reads the
+real layers of it. **The image has not been pushed and no digest is pinned yet**;
+the workload performs preflight only and obtains no attestation token, which
+remains `F8-02`. See `03_SECURITY_ACCESS.md` §2.
 
 `execution/attestation.py` (F8-01) owns that definition: `TrustLevel`, `AttestationEvidence`, `AttestationPolicy`, `AttestationFailure`, the `AttestationVerifier` and `AttestationKeyResolver` ports, and `verify_attestation_token` — the only function that may produce `HARDWARE_ATTESTED`, and only after signature, algorithm, issuer, audience, expiry, workload identity, image digest, hardware model and debug status have all passed. `provider.py` re-exports the two types so executors keep one import. Every failure yields `DEVELOPMENT_ISOLATION` with a reason. The module verifies a token it is handed and contains no way to obtain one; that is `F8-02`, blocked on B-04 and not simulated. See `03_SECURITY_ACCESS.md` §2.
 

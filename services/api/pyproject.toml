@@ -52,7 +52,16 @@ ignore = ["S101"]  # assert is fine in tests
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["src", "tests"]
+# `entrypoint.py` is Python that runs inside the attested trust boundary and
+# `dockerfile_scan.py` is a security guard that `build.sh` and the test suite
+# both run, so both are held to the same strictness as the service even though
+# neither ships in this artefact.
+files = [
+    "src",
+    "tests",
+    "../../infra/confidential-space/entrypoint.py",
+    "../../infra/confidential-space/dockerfile_scan.py",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
