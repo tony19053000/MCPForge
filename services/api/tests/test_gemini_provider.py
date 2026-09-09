@@ -230,7 +230,7 @@ def test_vertex_backend_needs_no_api_key() -> None:
     settings = Settings(
         gemini_backend=GeminiBackend.VERTEX,
         gemini_api_key=None,
-        google_cloud_project="launchforge-tee",
+        google_cloud_project="mcpforge-aa5c2",
     )
     assert settings.gemini_configured is True
 
@@ -289,14 +289,20 @@ def test_the_vertex_backend_builds_a_vertex_client_with_no_key() -> None:
     settings = Settings(
         gemini_backend=GeminiBackend.VERTEX,
         gemini_api_key=None,
-        google_cloud_project="launchforge-tee",
-        google_cloud_location="europe-west4",
+        google_cloud_project="mcpforge-aa5c2",
+        # Deliberately not `us-central1`. This asserts the configured location
+        # is read rather than defaulted, so it must differ from
+        # `Settings.google_cloud_location`'s default — with the default here the
+        # test would pass even if the provider ignored the setting entirely.
+        # It models nothing about MCPForge's own deployment region, which is
+        # us-central1 everywhere else.
+        google_cloud_location="asia-northeast1",
     )
     client = GoogleGenAIProvider._build_client(settings)
     assert client is not None
     assert client.vertexai is True
-    assert client._api_client.project == "launchforge-tee"
-    assert client._api_client.location == "europe-west4"
+    assert client._api_client.project == "mcpforge-aa5c2"
+    assert client._api_client.location == "asia-northeast1"
 
 
 def test_the_api_key_backend_does_not_build_a_vertex_client() -> None:

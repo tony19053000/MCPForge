@@ -88,12 +88,41 @@ Phases 8–9, tickets `F8-01` through `F9-05`, plus `F6-05` (GitHub webhook, nee
 | ID | Blocker | Impact | Status |
 |---|---|---|---|
 | B-01 | ~~No Gemini API key~~ — **resolved** | Key supplied and verified with a real structured call and a real stream against `gemini-3.7-flash`. Vertex/ADC is also implemented as a no-secret alternative | Closed |
-| B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally (quota project `launchforge-tee`) | Closed |
+| B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally. The quota project was originally `launchforge-tee`; MCPForge is now pinned to the single canonical project `mcpforge-aa5c2` (see the Google Cloud identifiers section below) | Closed |
 | B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
 | B-03 | ~~No GitHub App~~ — **resolved** | App 4797679 registered and installed on `tony19053000`, scoped to selected repositories. Verified live: contents=write, pull_requests=write, metadata=read, and nothing else | Closed |
 | B-04 | No GCP Confidential Space infrastructure | Ticket `F8-02` cannot be completed and is marked `BLOCKED`. **It will not be simulated or marked done.** Development isolation continues to work and is labelled honestly. The project owner has since created GCP project `mcpforge-aa5c2` with an Artifact Registry repository; the registry is still empty and no workload identity pool or Confidential VM exists, so the blocker stands. Clearing it is `F8-02a` (workload image) then `F8-02b` (workload identity), then `F8-02` | Open — narrowing; Phase 8 |
 
 None of these block Phase 1. Work continues on everything that can be built and tested without them.
+
+---
+
+## Google Cloud identifiers — canonical
+
+MCPForge uses **one** Google Cloud project. Every environment variable, image
+path, service account, Artifact Registry path, attestation policy claim, test
+fixture and document uses these values and no others.
+
+| Item | Value |
+|---|---|
+| Project | `mcpforge-aa5c2` |
+| Region | `us-central1` |
+| Artifact Registry repository | `mcpforge-executor` |
+| Image path | `us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/<image>` |
+| Workload service account | `mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com` |
+| Fixture zone | `us-central1-a` |
+
+**`launchforge-tee` and `launchforge-secure-executor` are not MCPForge
+resources and must never be referenced.** `launchforge-tee` is a real,
+accessible project in the owner's account rather than a dead placeholder, so a
+stray reference works silently instead of failing loudly — which is precisely
+why it is banned by name rather than left to care. `europe-docker.pkg.dev` and
+`europe-west4` are likewise not MCPForge paths.
+
+An audit during Phase 8 found ten references to the wrong project across `.env`,
+the attestation and Gemini test fixtures, and this file. All were corrected;
+Context State Log entry 0002 keeps its original wording with an annotation,
+because the log records what was true at the time.
 
 ---
 
@@ -211,6 +240,8 @@ Files introduced:
 ### 0002 — Authentication decision revised before Phase 1
 
 **Owner input.** A Firebase project was created with Google sign-in enabled, but **Firebase Auth is not committed to as the production solution** — the likely direction is direct Google OAuth, especially for a Vercel deployment. Service-account key creation is blocked by organization policy. Local Application Default Credentials are configured (`gcloud auth application-default login`, quota project `launchforge-tee`). Phase 1 must not block on final auth architecture, and authentication must stay cleanly removable.
+
+> **Annotation, added during Phase 8.** The quota project recorded above is history, not current configuration. MCPForge is now pinned to the single canonical project `mcpforge-aa5c2`; `launchforge-tee` is a separate, unrelated project and no MCPForge configuration may reference it. This entry is preserved unedited because the Context State Log records what was true at the time.
 
 **What changed, and why.**
 

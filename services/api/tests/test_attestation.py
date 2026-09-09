@@ -43,7 +43,7 @@ from tests.structure import SRC, python_files
 AUDIENCE = "mcpforge-run-b3f1c0"
 IMAGE_DIGEST = "sha256:" + "ab" * 32
 OTHER_DIGEST = "sha256:" + "cd" * 32
-WORKLOAD_SA = "mcpforge-workload@launchforge-tee.iam.gserviceaccount.com"
+WORKLOAD_SA = "mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com"
 
 
 # -- fixtures ---------------------------------------------------------------
@@ -114,7 +114,9 @@ def make_attestation_token(private_pem: str) -> MakeAttestationToken:
         issued_ago: int = 0,
         not_before_in: int | None = None,
         image_digest: str = IMAGE_DIGEST,
-        image_reference: str = "europe-docker.pkg.dev/launchforge-tee/mcpforge/worker:1.4.0",
+        image_reference: str = (
+            "us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload:1.4.0"
+        ),
         service_account: str = WORKLOAD_SA,
         hardware_model: str = "GCP_AMD_SEV",
         software_name: str = "CONFIDENTIAL_SPACE",
@@ -126,8 +128,8 @@ def make_attestation_token(private_pem: str) -> MakeAttestationToken:
         claims: dict[str, Any] = {
             "iss": issuer,
             "aud": audience,
-            "sub": "https://www.googleapis.com/compute/v1/projects/launchforge-tee/zones/"
-            "europe-west4-a/instances/mcpforge-worker-1",
+            "sub": "https://www.googleapis.com/compute/v1/projects/mcpforge-aa5c2/zones/"
+            "us-central1-a/instances/mcpforge-worker-1",
             "iat": now - issued_ago,
             "exp": now + expires_in,
             "google_service_account": service_account,
@@ -199,7 +201,9 @@ def base_claims() -> dict[str, Any]:
         "submods": {
             "container": {
                 "image_digest": IMAGE_DIGEST,
-                "image_reference": "europe-docker.pkg.dev/p/mcpforge/worker:1.4.0",
+                "image_reference": (
+                    "us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload:1.4.0"
+                ),
             }
         },
     }
