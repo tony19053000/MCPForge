@@ -287,6 +287,8 @@ Implementations:
 
 **Trust levels are an enum with exactly one meaning each:** `DEVELOPMENT_ISOLATION` and `HARDWARE_ATTESTED`. `HARDWARE_ATTESTED` is only ever set by code that has actually verified an attestation token. There is no path that sets it optimistically, and the UI renders the enum, not a boolean.
 
+`execution/attestation.py` (F8-01) owns that definition: `TrustLevel`, `AttestationEvidence`, `AttestationPolicy`, `AttestationFailure`, the `AttestationVerifier` and `AttestationKeyResolver` ports, and `verify_attestation_token` — the only function that may produce `HARDWARE_ATTESTED`, and only after signature, algorithm, issuer, audience, expiry, workload identity, image digest, hardware model and debug status have all passed. `provider.py` re-exports the two types so executors keep one import. Every failure yields `DEVELOPMENT_ISOLATION` with a reason. The module verifies a token it is handed and contains no way to obtain one; that is `F8-02`, blocked on B-04 and not simulated. See `03_SECURITY_ACCESS.md` §2.
+
 ## 9. GitHub integration
 
 - GitHub **App**, per-repository installation selected by the user. Never `repo`-wide OAuth for the whole account.

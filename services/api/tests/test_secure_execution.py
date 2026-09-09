@@ -59,33 +59,26 @@ async def test_no_attestation_is_invented(executor: DevelopmentSecureExecutor) -
     assert await executor.attestation() is None
 
 
-def test_hardware_attested_appears_only_as_an_enum_member() -> None:
-    """No code path in the whole backend can produce HARDWARE_ATTESTED.
+def test_the_development_executor_names_no_attested_trust_level() -> None:
+    """F3-04: no code path *in this implementation* can set the attested level.
 
-    03_SECURITY_ACCESS.md §2: it may be assigned only by code that has verified
-    a real attestation, and no such code exists yet. If someone later wires it
-    up optimistically — `return TrustLevel.HARDWARE_ATTESTED`, or assigning it
-    behind a config flag — this fails.
-
-    Uses the AST rather than text, so documentation explaining the rule does not
-    trip it while real usage does.
+    The whole-backend rule — that the attested trust level is produced by exactly
+    one function, after full verification — moved to
+    `tests/test_attestation.py::test_exactly_one_function_can_produce_the_attested_trust_level`
+    when `F8-01` defined that function. This narrower check stays here because
+    F3-04's own acceptance criterion is about this file.
     """
     import ast
 
-    offenders: list[str] = []
-    for path in (SRC / "mcpforge").rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            # TrustLevel.HARDWARE_ATTESTED used anywhere in real code.
-            if isinstance(node, ast.Attribute) and node.attr == "HARDWARE_ATTESTED":
-                offenders.append(f"{path.relative_to(SRC)}:{node.lineno}: attribute access")
-            # A bare assignment outside the TrustLevel enum body.
-            if isinstance(node, ast.ClassDef) and node.name != "TrustLevel":
-                for stmt in ast.walk(node):
-                    if isinstance(stmt, ast.Name) and stmt.id == "HARDWARE_ATTESTED":
-                        offenders.append(f"{path.relative_to(SRC)}:{stmt.lineno}: assignment")
-
-    assert not offenders, "HARDWARE_ATTESTED is reachable in code:\n" + "\n".join(offenders)
+    tree = ast.parse((SRC / "mcpforge" / "execution" / "development.py").read_text())
+    offenders = [
+        f"development.py:{node.lineno}"
+        for node in ast.walk(tree)
+        if (isinstance(node, ast.Attribute) and node.attr == "HARDWARE_ATTESTED")
+        or (isinstance(node, ast.Name) and node.id == "HARDWARE_ATTESTED")
+        or (isinstance(node, ast.Constant) and node.value == "HARDWARE_ATTESTED")
+    ]
+    assert not offenders, "the development executor claims attestation:\n" + "\n".join(offenders)
 
 
 async def test_the_workspace_reports_its_own_trust_level(workspace: Workspace) -> None:

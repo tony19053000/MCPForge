@@ -497,7 +497,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Verification failure yields `DEVELOPMENT_ISOLATION`, never an optimistic upgrade; `HARDWARE_ATTESTED` is assignable from exactly one function, and only after full verification.
 **Tests.** Valid, tampered-signature, expired, wrong-audience and wrong-digest token tests; a static test asserting only one call site sets `HARDWARE_ATTESTED`.
 **Security.** T7 control — the single most misrepresentable claim in the product.
-**Status.** `PENDING`
+**Status.** `DONE`
 
 ### F8-02 — ConfidentialSpaceSecureExecutor
 **Purpose.** The production confidential execution path.

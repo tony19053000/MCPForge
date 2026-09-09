@@ -7,36 +7,33 @@ Repository jobs run inside a boundary. Two implementations are planned:
 - `ConfidentialSpaceSecureExecutor` — Phase 8, blocked on real GCP
   infrastructure. It is not simulated.
 
-`TrustLevel` is an enum, never a boolean. `HARDWARE_ATTESTED` is assignable only
-by code that has verified a real attestation, and no such code exists yet.
+`TrustLevel` and `AttestationEvidence` are defined in `attestation.py`, which is
+the single module that decides what "verified" means, and re-exported here so
+this stays the one import every executor needs. `TrustLevel` is an enum, never a
+boolean; its attested member is produced by exactly one function, in that module,
+and no code path in MCPForge calls it yet.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from mcpforge.execution.attestation import AttestationEvidence, TrustLevel
 
-class TrustLevel(StrEnum):
-    """What the execution boundary actually is. The UI renders this, not a boolean.
-
-    There is no configuration flag, environment variable or test fixture that can
-    produce HARDWARE_ATTESTED without a verified attestation token.
-    """
-
-    DEVELOPMENT_ISOLATION = "DEVELOPMENT_ISOLATION"
-    HARDWARE_ATTESTED = "HARDWARE_ATTESTED"
-
-
-@dataclass(frozen=True)
-class AttestationEvidence:
-    """Only produced by a verified attestation. Phase 8."""
-
-    issuer: str
-    image_digest: str
-    verified_at: str
+__all__ = [
+    "AttestationEvidence",
+    "Command",
+    "CommandNotAllowedError",
+    "CommandResult",
+    "PathEscapeError",
+    "SandboxError",
+    "SecureExecutionProvider",
+    "TrustLevel",
+    "Workspace",
+    "WorkspaceSpec",
+]
 
 
 @dataclass(frozen=True)

@@ -6,17 +6,19 @@
 
 ## Overall completion
 
-**80%** — Phase 7 complete, verified by `[REVIEWER / TESTER]` on round 10.
+**82%** — Phase 8 in progress. `F8-01` complete, verified by `[REVIEWER / TESTER]` on round 4.
 
 ## Current phase
 
-**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — not started. `F8-02` is `BLOCKED` on blocker B-04 (no GCP Confidential Space infrastructure) and will not be simulated. `F8-01`, `F8-03`, `F8-04` and `F8-05` can proceed.
+**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — in progress. `F8-01` is `DONE`. `F8-02` is `BLOCKED` on blocker B-04 (no GCP Confidential Space infrastructure) and will not be simulated. `F8-03`, `F8-04` and `F8-05` are `PENDING`.
+
+`F8-01` took **four review rounds**. Rounds 1, 2 and 3 returned `FAIL` with 3, 4 and 4 findings. Every finding was a verification failure escaping `verify_attestation_token` as an unhandled exception, or a comment asserting an invariant the code did not have — never an improper upgrade to `HARDWARE_ATTESTED`, which no round was able to produce. Three separate rounds found a security comment claiming more than the code delivered, which is why the module now ties each asserted invariant to the test that fails if it is violated. Round 4 returned `PASS`.
 
 Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2 and 1 findings); the route-enumeration approach that produced rounds 4–6 was removed at the project owner's direction and replaced with a route-independent property test. Rounds 7, 8 and 9 then returned `FAIL` with 6, 2 and 2 findings — every one of them found by mutating the source and observing that the suite stayed green, and three of them being gaps that a previous round's *fix* had introduced. Round 10 returned `PASS`.
 
 ## Current ticket
 
-None. Next intended task is `F8-01` — the attestation evidence model.
+None. Next intended task is `F8-03` — the trust panel.
 
 ---
 
@@ -67,6 +69,7 @@ None. Next intended task is `F8-01` — the attestation evidence model.
 | F7-03 | MCPForge gated mutation tools | PASS (round 10) — `DONE, PARTIALLY BLOCKED`, see `F9-01` |
 | F7-04 | Agent-origin activity labelling | PASS (round 10) |
 | F7-05 | Repository selector UI | PASS (round 10) |
+| F8-01 | Attestation evidence model | PASS (round 4) |
 
 ## In progress
 
@@ -98,7 +101,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 
 | Check | State |
 |---|---|
-| Unit | **1005 passing** — 222 web (Vitest/RTL), 783 API (pytest), 3 skipped (2 web, 1 API). The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1155 passing** — 222 web (Vitest/RTL), 933 API (pytest), 3 skipped (2 web, 1 API). The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -122,7 +125,7 @@ None of these block Phase 1. Work continues on everything that can be built and 
 | Generated code | Every model-authored string passes through `generation/escaping.py` before becoming part of a file. Generated output is scanned for credentials before it is emitted. Generated tools validate declared types at runtime, not only presence |
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
 | Chain-of-thought | Never sent by the API and never rendered by the UI. Both tiers assert it independently |
-| Attestation | **Not implemented, not simulated.** An AST-based test asserts `HARDWARE_ATTESTED` appears nowhere in backend code except as an enum member |
+| Attestation | **Verification implemented (`F8-01`); no attestation is obtained, and none is simulated.** `execution/attestation.py` defines the trust enum, the evidence record, a failure taxonomy, an `AttestationPolicy` and `verify_attestation_token` — the one function permitted to produce `HARDWARE_ATTESTED`, and only after checking signature, algorithm, issuer, single audience, expiry, not-before, required claims, workload service account, exact image digest, hardware model, software stack and debug status. Every failure returns `DEVELOPMENT_ISOLATION` with no evidence and a named reason. Two AST sweeps over every backend module assert that exactly one function produces the attested level and exactly one constructs evidence; both match on names and neither is claimed to defeat `getattr` indirection. Nothing calls the verifier yet: `F8-02` is `BLOCKED` on B-04, the executor still reports `DEVELOPMENT_ISOLATION`, and `/healthz` reports `hardware_attested: false` |
 | Secret filtering | Implemented. A fixture repository with thirteen planted credentials yields zero secret bytes downstream, and none in the quarantine records either. Quarantined files are never opened, and matching is case-folded — an earlier version read `.ENV`, `ID_RSA` and `Server.PEM` |
 | Network isolation | Real, via an unprivileged user+network namespace. Where the kernel disallows it the executor refuses to run rather than claiming an isolation it lacks |
 | Repository access mode | Implemented. `READ_ONLY` by default; elevation requires the project owner and records who and when; a demo project can never be elevated |
@@ -736,3 +739,83 @@ execution continues" is unmet and the read tools honestly return
 
 **Next intended task.** `F8-01` — the attestation evidence model. `F8-02` stays
 `BLOCKED` on B-04 and is never marked done on a simulation.
+
+---
+
+### 0011 — Phase 8 in progress: what "verified" means, defined before anything claims it
+
+**What was built.** `F8-01`, the attestation evidence model — the T7 control, and
+the single most misrepresentable claim in the product. `TrustLevel` and
+`AttestationEvidence` moved out of `execution/provider.py` into the new
+`execution/attestation.py` and are re-exported, so every existing import site is
+unchanged. The module adds `AttestationFailure`, `AttestationPolicy` (with
+`AttestationPolicyError`), `AttestationOutcome`, the `AttestationKeyResolver` and
+`AttestationVerifier` ports, `JwksAttestationKeyResolver`,
+`ConfidentialSpaceAttestationVerifier`, and `verify_attestation_token`.
+
+`verify_attestation_token` checks, in order: a non-empty token; an asymmetric
+algorithm from a fixed allowlist, refused *before* the signing key is resolved so
+`alg:none` and HS256 confusion never reach key material; the prepared key is a
+verification key; the signature; issuer; a **single** audience that is exactly
+ours — a token addressed to us and to somebody else is refused, because the
+audience is a per-run nonce; expiry and not-before with bounded skew; required
+registered claims; workload service account; container image digest matched
+exactly against a canonical `sha256:<64 lowercase hex>` with no case folding, no
+prefix match and no whitespace stripping; hardware model; software stack; and
+debug status.
+
+**Decisions made.**
+1. **`AttestationOutcome` is the only return shape**, and `rejected()` is the
+   only failure constructor. `__post_init__` forbids a raised trust level
+   without evidence, so a caller cannot hand-assemble a verified-looking result.
+2. **A permissive policy is a programming error, not a soft path.**
+   `AttestationPolicy` raises at construction if it has no audience, a
+   non-canonical digest, an empty hardware set or a negative skew.
+3. **`JwksAttestationKeyResolver` has no default JWKS URL.** Guessing the
+   Confidential Space endpoint inside a security control is worse than requiring
+   the argument. `F8-02` supplies it.
+4. **Enumeration comes from the code, never from recall.** `nbf` was missed by
+   two consecutive rounds because the adversarial-claim list was written from
+   memory. The matrix now derives the claim set from `attestation.py`'s own AST
+   and **errors on an unrecognised receiver** rather than guessing — which is
+   what surfaced `header.get("alg")` as a distinct category instead of silently
+   miscounting it.
+5. **Every asserted invariant names the test that would fail if it were
+   violated**, or is bounded to what is demonstrated. The backstop claim now
+   reads "no input the test matrix can construct" — a bound on the enumeration,
+   not a proof of unreachability.
+
+**Files introduced.** `services/api/src/mcpforge/execution/attestation.py`,
+`services/api/tests/test_attestation.py` (150 tests).
+
+**Review gate outcome.** `PASS` on the fourth reviewer round. Rounds 1, 2 and 3
+returned `FAIL` with 3, 4 and 4 findings. Every one was a verification failure
+escaping as an unhandled exception — `OverflowError` from a `1e30` expiry,
+`jwt.InvalidKeyError` slipping past an `InvalidTokenError` catch, a bare
+`TypeError` from a non-RSA key, `int(None)` on `nbf`, an `AttributeError` from
+an RSA *private* key — or a comment asserting an invariant the code did not
+have. **No round produced an improper upgrade to `HARDWARE_ATTESTED`**; the
+trust boundary held throughout, and the reviewer's own injection attempts,
+30-mutation batteries and ~40 out-of-matrix token shapes could not break it.
+Two defects were found by the coder's own sweep rather than the reviewer: a
+multi-audience token being accepted, and a case-folded digest match.
+
+**What NOT to change accidentally.** The single-producer rule — exactly one
+function may return `HARDWARE_ATTESTED`, and exactly one may construct
+`AttestationEvidence`; both are pinned by AST sweeps with non-empty self-guards.
+The `AttestationOutcome.__post_init__` invariant. The no-normalisation rule on
+the token side; whitespace-only-counts-as-absent is the only exception, and it
+has its own test. The absence of a default JWKS URL. The two guards labelled
+`UNREACHABLE TODAY` — their comments state exactly what they do not do.
+
+**Open issues.** `F8-02` remains `BLOCKED` on B-04 and is never marked done on a
+simulation; nothing calls the verifier yet, and a test asserts that. Clearing
+B-04 additionally requires work no ticket describes — a Confidential Space
+workload image and the workload-identity infrastructure — so `F8-02a` and
+`F8-02b` must be written into `05_FEATURE_TICKETS.md`, with `01_PRD.md` §8
+updated in the same commit, before any of it is built. A ~100,000-deep nested
+JSON claim reaches the backstop as `VERIFICATION_ERROR`; it is fail-closed and
+documented as outside the enumerated matrix.
+
+**Next intended task.** `F8-03` — the trust panel. It renders server state only,
+and for now that state is `DEVELOPMENT_ISOLATION`.
