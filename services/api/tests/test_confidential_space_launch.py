@@ -181,7 +181,7 @@ def test_the_plan_uses_exactly_the_canonical_launch_flags(plan: LaunchPlan) -> N
     flags = {name: value for name, value in plan.flags.items() if name != "--metadata"}
     assert flags == {
         "--project": "mcpforge-aa5c2",
-        "--zone": "us-central1-a",
+        "--zone": "us-central1-b",
         "--confidential-compute-type": "SEV",
         "--machine-type": "n2d-standard-2",
         "--maintenance-policy": "TERMINATE",

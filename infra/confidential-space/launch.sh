@@ -42,7 +42,7 @@
 # debug VM keeps running and billing.
 #
 # Read it:  gcloud compute instances get-serial-port-output <instance> \
-#             --project=mcpforge-aa5c2 --zone=us-central1-a
+#             --project=mcpforge-aa5c2 --zone=us-central1-b
 
 set -euo pipefail
 
@@ -51,7 +51,7 @@ set -euo pipefail
 # `launchforge-tee`, `launchforge-secure-executor`, `europe-west4` and
 # `europe-docker.pkg.dev` are NOT MCPForge resources and must never appear here.
 readonly PROJECT="mcpforge-aa5c2"
-readonly ZONE="us-central1-a"
+readonly ZONE="us-central1-b"
 readonly IMAGE_REPOSITORY="us-central1-docker.pkg.dev/${PROJECT}/mcpforge-executor/workload"
 readonly SERVICE_ACCOUNT="mcpforge-workload@${PROJECT}.iam.gserviceaccount.com"
 
