@@ -12,6 +12,9 @@
 #   * a dedicated workload service account
 #   * the project roles enumerated in policy.md, and only those
 #   * one binding of that pool's attested principals to that service account
+#   * the private attestation bucket (F8-02) — uniform bucket-level access,
+#     public access prevention enforced, objects deleted after one day — and
+#     the bucket-scoped role that lets the workload create objects in it
 #
 # It is **safe by default**: with no arguments it plans and prints, and changes
 # nothing. Mutating anything requires `--apply` explicitly.
@@ -64,7 +67,7 @@ readonly ISSUER_URI="https://confidentialcomputing.googleapis.com"
 # reviewer from a clean clone. It is pinned by exact equality below; a prefix
 # match, a `matches()` or a `!=` here would convert hardware attestation into no
 # attestation at all, which is what this ticket's tests exist to prevent.
-readonly IMAGE_DIGEST="sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db"
+readonly IMAGE_DIGEST="sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765"
 
 # ── The attribute condition ─────────────────────────────────────────────────
 #
@@ -112,6 +115,22 @@ readonly -a PROJECT_ROLES=(
   "roles/artifactregistry.reader"
 )
 
+# ── The attestation bucket (F8-02) ─────────────────────────────────────────
+#
+# The workload writes its raw attestation token to
+# gs://mcpforge-aa5c2-attestation/attestation/<run id>.jwt; the MCPForge API
+# reads it with the owner's ADC and verifies it. The token is signed by Google,
+# so the bucket is transport, not a trust anchor. It is still private.
+readonly ATTESTATION_BUCKET="mcpforge-aa5c2-attestation"
+readonly BUCKET_URL="gs://${ATTESTATION_BUCKET}"
+readonly BUCKET_LOCATION="${REGION}"
+
+# Granted on the bucket, never on the project. Enumerated in policy.md under
+# BUCKET ROLES and checked against it before anything runs.
+readonly -a BUCKET_ROLES=(
+  "roles/storage.objectCreator"
+)
+
 readonly -a REQUIRED_SERVICES=(
   "iam.googleapis.com"
   "sts.googleapis.com"
@@ -122,6 +141,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 readonly POLICY_DOC="${SCRIPT_DIR}/policy.md"
 readonly SCAN="${SCRIPT_DIR}/setup_scan.py"
+# Delete every object one day after creation. A token is single-use and
+# expires within the hour; nothing here needs keeping.
+readonly LIFECYCLE_FILE="${SCRIPT_DIR}/attestation-lifecycle.json"
 
 MODE="plan"
 CHANGES=0
@@ -158,6 +180,7 @@ self_check() {
   local -a roles=()
   local role
   for role in "${PROJECT_ROLES[@]}"; do roles+=(--role "${role}"); done
+  for role in "${BUCKET_ROLES[@]}"; do roles+=(--bucket-role "${role}"); done
   python3 "${SCAN}" --consistency "${POLICY_DOC}" --condition "${ATTRIBUTE_CONDITION}" \
     "${roles[@]}" \
     || die "setup.sh and policy.md disagree (above). Fix policy.md or the script; do not run either alone."
@@ -362,6 +385,74 @@ step_pool_binding() {
   fi
 }
 
+bucket_json() {
+  gcloud storage buckets describe "${BUCKET_URL}" --project "${PROJECT}" --format=json 2>/dev/null
+}
+
+# Prints one line per setting that differs from the declared one; nothing when
+# the bucket is as declared. The comparison lives in setup_scan.py.
+bucket_drift() {
+  printf '%s' "$1" | python3 "${SCAN}" --bucket-drift "${LIFECYCLE_FILE}" \
+    --bucket-location "${BUCKET_LOCATION}"
+}
+
+step_bucket() {
+  note ""
+  note "Attestation bucket"
+  local live drift
+  if ! live="$(bucket_json)" || [[ -z "${live}" ]]; then
+    change "create ${BUCKET_URL}: uniform access, public access prevented, objects deleted after 1 day" \
+      gcloud storage buckets create "${BUCKET_URL}" --project "${PROJECT}" \
+      --location="${BUCKET_LOCATION}" --uniform-bucket-level-access \
+      --public-access-prevention --lifecycle-file="${LIFECYCLE_FILE}"
+    return
+  fi
+  drift="$(bucket_drift "${live}")" || die "cannot read the settings of ${BUCKET_URL}"
+  if [[ -z "${drift}" ]]; then
+    note "  ok: ${BUCKET_URL} has the declared access, prevention and lifecycle"
+    return
+  fi
+  printf '%s\n' "${drift}" | sed 's/^/  drift: /'
+  if printf '%s\n' "${drift}" | grep -q '^location'; then
+    die "${BUCKET_URL} is in the wrong location; a bucket cannot be moved. Operator decision."
+  fi
+  change "update ${BUCKET_URL} to the declared access, prevention and lifecycle" \
+    gcloud storage buckets update "${BUCKET_URL}" --project "${PROJECT}" \
+    --uniform-bucket-level-access --public-access-prevention \
+    --lifecycle-file="${LIFECYCLE_FILE}"
+}
+
+# `role<TAB>member` on the bucket, empty when the bucket does not exist yet.
+bucket_bindings() {
+  gcloud storage buckets get-iam-policy "${BUCKET_URL}" --project "${PROJECT}" \
+    --flatten="bindings[].members" \
+    --format="value(bindings.role,bindings.members)" 2>/dev/null || true
+}
+
+held_bucket_roles() {
+  local role member
+  while IFS=$'\t' read -r role member; do
+    [[ "${member}" == "serviceAccount:${SERVICE_ACCOUNT}" ]] && printf '%s\n' "${role}"
+  done < <(bucket_bindings)
+  return 0
+}
+
+step_bucket_roles() {
+  note ""
+  note "Bucket roles"
+  local held role
+  held="$(held_bucket_roles)"
+  for role in "${BUCKET_ROLES[@]}"; do
+    if printf '%s\n' "${held}" | grep -Fxq "${role}"; then
+      note "  ok: ${SERVICE_ACCOUNT} already holds ${role} on ${BUCKET_URL}"
+    else
+      change "grant ${role} on ${BUCKET_URL} (this bucket only) to ${SERVICE_ACCOUNT}" \
+        gcloud storage buckets add-iam-policy-binding "${BUCKET_URL}" --project "${PROJECT}" \
+        --member="serviceAccount:${SERVICE_ACCOUNT}" --role="${role}"
+    fi
+  done
+}
+
 # ── Verify ──────────────────────────────────────────────────────────────────
 #
 # Read-only. "Least privilege" is a claim about what is *absent*, so the check
@@ -387,6 +478,26 @@ step_verify() {
     [[ -z "${role}" ]] && continue
     printf '%s\n' "${PROJECT_ROLES[@]}" | grep -Fxq "${role}" \
       || problem "role ${role} is held by ${SERVICE_ACCOUNT} but is not enumerated in policy.md"
+  done <<<"${held}"
+
+  local live drift
+  if ! live="$(bucket_json)" || [[ -z "${live}" ]]; then
+    problem "bucket ${BUCKET_URL} does not exist"
+  else
+    drift="$(bucket_drift "${live}")" || die "cannot read the settings of ${BUCKET_URL}"
+    while read -r role; do
+      [[ -n "${role}" ]] && problem "${BUCKET_URL} ${role}"
+    done <<<"${drift}"
+  fi
+  held="$(held_bucket_roles)"
+  for role in "${BUCKET_ROLES[@]}"; do
+    printf '%s\n' "${held}" | grep -Fxq "${role}" \
+      || problem "missing role ${role} on ${BUCKET_URL}"
+  done
+  while read -r role; do
+    [[ -z "${role}" ]] && continue
+    printf '%s\n' "${BUCKET_ROLES[@]}" | grep -Fxq "${role}" \
+      || problem "role ${role} on ${BUCKET_URL} is held by ${SERVICE_ACCOUNT} but is not in policy.md"
   done <<<"${held}"
 
   condition="$(normalise "$(provider_field attributeCondition)")"
@@ -418,6 +529,7 @@ banner() {
   note "  issuer:          ${ISSUER_URI}"
   note "  service account: ${SERVICE_ACCOUNT}"
   note "  image digest:    ${IMAGE_DIGEST}"
+  note "  bucket:          ${BUCKET_URL} (${BUCKET_LOCATION})"
   note ""
   note "  attribute condition:"
   local clause
@@ -456,6 +568,8 @@ main() {
   step_service_account
   step_project_roles
   step_pool_binding "${number}"
+  step_bucket
+  step_bucket_roles
 
   note ""
   if [[ "${CHANGES}" -eq 0 ]]; then

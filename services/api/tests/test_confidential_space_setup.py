@@ -60,10 +60,12 @@ from mcpforge.execution.attestation import (
     DEFAULT_ALLOWED_HARDWARE_MODELS,
     AttestationPolicy,
 )
+from tests.launch_plan import run_launch_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INFRA_DIR = REPO_ROOT / "infra" / "confidential-space"
 SETUP_SCRIPT = INFRA_DIR / "setup.sh"
+LAUNCH_SCRIPT = INFRA_DIR / "launch.sh"
 POLICY_DOC = INFRA_DIR / "policy.md"
 README = INFRA_DIR / "README.md"
 SCAN_MODULE = INFRA_DIR / "setup_scan.py"
@@ -438,6 +440,31 @@ def test_the_digest_clause_is_exact_equality_against_the_pinned_digest(
     assert right == f"'{digest.group(1)}'"
 
 
+def test_the_launch_plan_boots_the_image_and_identity_the_condition_pins(
+    clauses: tuple[str, ...], tmp_path: Path
+) -> None:
+    """`launch.sh` and `setup.sh` must name the same image and the same account.
+
+    Read from what each script actually emits — the condition as gcloud
+    receives it, and the launch command as bash parses it — not from either
+    file's text. If they disagree, the VM boots an image the federation will
+    never admit, and the symptom is a refused token on a paid VM rather than a
+    failing test.
+    """
+
+    _, _, pinned = clause_for(clauses, IMAGE_DIGEST_PATH)
+    account, _, _ = clause_for(clauses, SERVICE_ACCOUNT_PATH)
+    plan = run_launch_plan(tmp_path)
+    assert plan.exit_code == 0, plan.stdout + plan.stderr
+
+    digest = pinned.strip("'")
+    reference = plan.metadata["tee-image-reference"]
+    assert reference.rsplit("@", 1)[1] == digest, (
+        f"launch.sh boots {reference}; setup pins {digest}"
+    )
+    assert plan.flags["--service-account"] == account.strip("'")
+
+
 @pytest.mark.parametrize("wildcard", ["*", "?", "%", ".*"])
 def test_no_clause_contains_a_wildcard(clauses: tuple[str, ...], wildcard: str) -> None:
     for clause in clauses:
@@ -615,7 +642,7 @@ def test_a_production_token_satisfies_the_condition(
         (
             "the digest with one character changed",
             ("submods", "container", "image_digest"),
-            "sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1dc",
+            "sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89766",
         ),
         (
             "an uppercase spelling of the pinned digest",
@@ -786,7 +813,7 @@ def test_no_banned_project_identifier_appears(banned: str) -> None:
     `test_the_banned_identifiers_are_named_only_where_they_are_forbidden`.
     """
 
-    for path in (SETUP_SCRIPT, SCAN_MODULE):
+    for path in (SETUP_SCRIPT, SCAN_MODULE, LAUNCH_SCRIPT):
         code = _code_only(path)
         assert banned not in code, f"{banned} appears in executable content of {path.name}"
 
@@ -822,7 +849,7 @@ def test_the_banned_identifiers_are_named_only_where_they_are_forbidden() -> Non
     """
 
     forbidding = ("never", "not ", "no ", "banned", "forbidden", "wrong", "must")
-    for path in (SETUP_SCRIPT, POLICY_DOC, SCAN_MODULE):
+    for path in (SETUP_SCRIPT, POLICY_DOC, SCAN_MODULE, LAUNCH_SCRIPT):
         lines = path.read_text(encoding="utf-8").splitlines()
         blocks: list[tuple[int, list[str]]] = []
         for number, line in enumerate(lines, 1):

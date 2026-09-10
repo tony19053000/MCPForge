@@ -18,17 +18,22 @@ there, and prove it by test rather than by reading the Dockerfile.
 | | |
 |---|---|
 | Image builds | Yes, reproducibly, from a clean checkout |
-| Image pushed to Artifact Registry | **No.** Nothing has been pushed. The registry is still empty |
+| Image pushed to Artifact Registry | **An earlier build only.** `sha256:76a88540…` was pushed on 2026-09-10T18:56 and is the only image in the registry. The digest below — this tree's — **has not been pushed** |
+| Workload identity | The `mcpforge-attestation` provider is live and its condition pins `sha256:76a88540…`, **not** the digest below; the repin has not been applied (observed read-only, 2026-09-11) |
+| Attestation bucket | **Not created.** `setup.sh` now plans it; nobody has applied that |
 | Digest below | A **local** build digest, not a registry digest |
-| Attestation token obtained | No. The workload obtains none, and none is simulated |
+| Attestation token | Since `F8-02` the image requests one from the launcher and **delivers it** to the relying party; it verifies nothing itself. **Never yet run on real Confidential Space** |
 | Repository job executed | No. There is no job runner in this image |
-| Blocker `B-04` | Still open. This ticket narrows it; `F8-02b` and `F8-02` close it |
+| Blocker `B-04` | Still open. `F8-02` stays `BLOCKED` until a real run produces a token that **the API** verifies against its own pinned digest and issued nonce |
 
-The image performs **preflight only**: it validates its configuration and its
-runtime environment, prints a JSON record, and exits. Obtaining an attestation
-token and running a repository job is `F8-02`, which is `BLOCKED` on `B-04`.
-`entrypoint.py` says so in its output (`attestation_token_obtained: false`,
-`job_runner_present: false`) rather than leaving a reader to infer it.
+The image performs preflight, then **obtains an attestation token from the
+Confidential Space launcher and writes it** to
+`gs://mcpforge-aa5c2-attestation/attestation/<run id>.jwt`, prints one JSON
+record, and exits. It does not verify the token: a workload vouching for itself
+proves nothing to anyone, so the MCPForge API — outside the TEE — is the only
+verifier. Under plain Docker there is no launcher, so the image refuses with
+exit 16 after every preflight check has passed; that is the correct outcome,
+not a fault.
 
 ---
 
@@ -36,12 +41,16 @@ token and running a repository job is `F8-02`, which is `BLOCKED` on `B-04`.
 
 ```
 image:  us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload
-digest: sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db
+digest: sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765
 ```
 
-Produced by `./build.sh` on 2026-09-09 from a cold BuildKit cache, and
-reproduced by a second cold build, from a second checkout with mtimes five years
-apart, and across two different HEADs.
+Produced by `./build.sh` on 2026-09-10 from a cold BuildKit cache. It moved
+from `sha256:76a88540…` because `F8-02` changed files the image carries —
+`entrypoint.py` and `mcpforge/execution/` — which is what a content-addressed
+digest is for (STATUS.md entry 0014). The reproducibility tests in
+`test_workload_image.py` rebuild it on every run; the earlier cross-checkout and
+cross-HEAD reproductions by a reviewer were performed against earlier digests,
+not this one.
 
 **This digest is not yet the value to pin.** It is the digest of the OCI layout
 `build.sh` writes locally. It is *intended* to equal the digest Artifact
@@ -68,9 +77,10 @@ repository, so the image is `.../mcpforge-executor/workload`.
 
 **In:**
 
-- `mcpforge.execution` — `attestation.py`, `provider.py`, `development.py`
+- `mcpforge.execution` — `attestation.py`, `provider.py`, `development.py`,
+  and since `F8-02` `confidential_space.py` (the launcher client and executor)
 - `mcpforge.logging` — imported by the executor
-- `entrypoint.py` — this directory's preflight
+- `entrypoint.py` — this directory's preflight and attestation step
 - `anyio`, `structlog`, `pyjwt[crypto]` and their transitive closure, installed
   from `requirements.txt` with `--require-hashes`
 
@@ -131,15 +141,28 @@ are the same statement.
 ```dockerfile
 LABEL "tee.launch_policy.allow_env_override"="MCPFORGE_RUN_ID,MCPFORGE_ATTESTATION_AUDIENCE"
 ```
-An allowlist, and it is short on purpose. These two are genuinely per-run: the
-run id correlates the job with the orchestrator's run, and the audience is the
-nonce that the attestation token must carry as its single audience, which is
-what stops a token from one run being replayed into another.
+An allowlist of the two per-run values, both **issued by the relying party**
+(the MCPForge API): the run id names the token object, and the audience is the
+nonce the token must carry as its single audience. Replay protection comes from
+the API verifying against its own record of that nonce, once — not from
+anything the workload checks. `launch.sh` reads both from the API's record; see
+"Launching a VM, and who verifies it" below.
 
-Note what is *absent*: `MCPFORGE_WORKSPACE_ROOT`. It is baked into the image as
-an `ENV`, so it is present, but an operator cannot change it. It is the path
-jail root; an operator who could set it to `/` would move the jail rather than
-escape it, which is the same outcome by a politer route.
+An earlier draft of `F8-02` added `MCPFORGE_EXPECTED_IMAGE_DIGEST` here for an
+in-TEE self-check. It was removed: the relying party pins the digest from its
+own configuration, so an operator-supplied copy added nothing anyone could rely
+on, and the override surface is back to two names
+(`test_the_override_surface_is_the_two_per_run_values`).
+
+Note what is *absent*: `MCPFORGE_WORKSPACE_ROOT`. It is the path jail root; an
+operator who could set it to `/` would move the jail rather than escape it,
+which is the same outcome by a politer route. Since `F8-02` it is not an
+environment variable at all but the constant `WORKSPACE_ROOT = /workspace` in
+`entrypoint.py`: the same value and the same non-overridability, with no
+dependence on this image's `ENV` reaching the process at launch. The
+entrypoint refuses if the variable is set, even blank
+(`test_the_entrypoint_refuses_any_attempt_to_move_the_jail`), and still refuses
+a missing or unwritable `/workspace`.
 
 ```dockerfile
 LABEL "tee.launch_policy.log_redirect"="never"
@@ -225,18 +248,30 @@ fallback value for any required name anywhere in the file.
 
 | Exit | Reason | Fires when |
 |---|---|---|
-| `0` | `PREFLIGHT_OK` | every precondition held |
+| `0` | `TOKEN_DELIVERED` | every precondition held and a token was obtained and delivered — a **self-report about delivery, not attestation**; only the API's verification attests |
 | `10` | `CONFIG_MISSING` | a required variable is absent, empty, or whitespace |
 | `11` | `CONFIG_INVALID` | the run id is not a safe path component, or the audience is padded or too short to be a nonce |
 | `12` | `RUNNING_AS_ROOT` | `geteuid() == 0` |
 | `13` | `CREDENTIAL_PRESENT` / `CREDENTIAL_STATE_UNKNOWN` | credential material is reachable, or its presence could not be determined |
 | `14` | `WORKSPACE_UNUSABLE` | the path jail root is missing or not writable |
 | `15` | `WORKLOAD_PAYLOAD_MISSING` | the secure executor did not import |
+| `16` | `ATTESTATION_UNAVAILABLE` | no token was obtained from the launcher: socket missing, refused, timed out, non-200, or a body that is not exactly one compact JWS |
+| `17` | `DELIVERY_FAILED` | a token was obtained and could not be written to the bucket: no access token from the metadata server, upload refused, or an object for the run already exists |
 
-Required configuration: `MCPFORGE_RUN_ID`, `MCPFORGE_ATTESTATION_AUDIENCE`,
-`MCPFORGE_WORKSPACE_ROOT`. Whitespace-only counts as absent, matching the rule
-`attestation.py` applies to token claims — and `docker run -e VAR=` is exactly
-how an operator would blank a baked `ENV`, so it is tested.
+Required configuration: `MCPFORGE_RUN_ID` and `MCPFORGE_ATTESTATION_AUDIENCE`,
+both issued by the API and supplied per launch as `tee-env-*` metadata, none
+from the image (`test_every_required_name_is_supplied_by_exactly_one_source`
+checks this against the built image and the launch plan). Whitespace-only counts
+as absent, and `docker run -e VAR=` is how an operator would blank one, so it is
+tested. The bucket is the constant `mcpforge-aa5c2-attestation`, not
+configuration.
+
+**The workload's stdout never leaves the TEE on a real VM** (`log_redirect=never`).
+The exit status is the only signal, and the launcher reports it on the serial
+console as "workload task ended and returned N" (`launcher/container_runner.go`
+in `google/go-tpm-tools`) — which is why every refusal has its own code. The
+JSON line carries a 16-character SHA-256 prefix and the length of the token,
+never the token.
 
 Two details worth knowing:
 
@@ -299,14 +334,91 @@ It requires `gcloud auth configure-docker us-central1-docker.pkg.dev` to have
 been run. It creates nothing: no repository, no service account, no IAM binding.
 That is `F8-02b`.
 
-**`--push` has not been run.** The registry is empty. Pushing is a spend
-decision for the project owner and is deliberately left to them.
+**`--push` has been run once, by the project owner, for an earlier build:**
+`sha256:76a88540…`, pushed 2026-09-10T18:56. This tree's digest (above) has not
+been pushed. Pushing is the owner's decision and is deliberately left to them.
+
+---
+
+## Launching a VM, and who verifies it (F8-02)
+
+**The relying party is the MCPForge API, and it owns the nonce.** The whole
+sequence, every step but the VM itself plan-only or local:
+
+```bash
+(cd services/api && uv run python -m mcpforge.relying_party begin)    # API issues run id + audience
+./launch.sh --run-id <id>              # plan: print the VM command; run nothing
+./launch.sh --run-id <id> --apply      # owner only: create exactly that VM
+(cd services/api && uv run python -m mcpforge.relying_party verify <id>)
+```
+
+1. **The API issues a run** — a run id and a fresh 128-bit audience — and
+   records it pending in its run store (`CONFIDENTIAL_SPACE_RUN_DIR`).
+2. **`launch.sh` reads that record** through `relying_party show` and has no
+   other source for the audience: an unissued, already-verified or expired run
+   is refused before any command is built
+   (`test_a_run_the_relying_party_did_not_issue_cannot_be_launched`). It is
+   plan-only by default and calls no `gcloud` command without `--apply`.
+3. **The workload** requests a token with that audience and writes the raw
+   token to `gs://mcpforge-aa5c2-attestation/attestation/<run id>.jwt`,
+   create-only. It verifies nothing.
+4. **The API fetches the object and verifies it** with `verify_attestation_token`
+   against the audience it issued, the digest in its **own** configuration
+   (`CONFIDENTIAL_SPACE_IMAGE_DIGEST`), the workload service account, and
+   Google's keys from the discovery document. The run is consumed atomically
+   and a second verification is refused (`test_a_run_verifies_once_and_a_replay_is_refused`).
+   Only this verification can raise the trust level, and only then does the
+   trust panel show it. The API route `POST /api/attestation-runs/{id}/verify`
+   does the same inside a running server.
+
+The token is signed by Google, so the bucket is transport and need not be
+trusted; only the verifier must be.
+
+The VM command uses the canonical identifiers only: project `mcpforge-aa5c2`,
+zone `us-central1-a`, service account
+`mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com`, AMD SEV on
+`n2d-standard-2` with `--maintenance-policy=TERMINATE` and
+`--shielded-secure-boot`, image family `confidential-space` (production — the
+debug family reports `dbgstat=enabled` and the relying party refuses it with
+`DEBUG_MODE_ENABLED`, so a debug run can never clear B-04),
+`--scopes=cloud-platform` (the workload's storage credential needs it), and
+`--metadata` with the `^~^` delimiter. The metadata holds `tee-image-reference`
+and the two `tee-env-*` values and nothing else.
+
+**The image is referenced by digest**, `…/workload@sha256:…`. Google's metadata
+reference shows a tag and does not say either way; the launcher passes
+`tee-image-reference` verbatim to containerd's pull (`launcher/image.go` in
+`google/go-tpm-tools`), which accepts a digest reference. Read from source, not
+observed. The digest must be one that has been pushed, and
+`test_the_launch_plan_boots_the_image_and_identity_the_condition_pins` fails if
+`launch.sh` and `setup.sh` disagree.
+
+**Exit statuses are self-reports.** `log_redirect=never` keeps stdout inside the
+TEE; the serial console shows "workload task ended and returned N". That
+serial output appears on production images too, not only debug ones — the
+launcher writes it either way (`launcher/main.go` in `google/go-tpm-tools`). 0 means a
+token was obtained and delivered, nothing more. **`launch.sh` uses the
+production `confidential-space` family.** On the debug family the API's
+verification would refuse with `DEBUG_MODE_ENABLED` — the debug image reports
+`dbgstat: enabled` — which is not `HARDWARE_ATTESTED`, so a debug run cannot
+clear B-04. The F8-02 review caught `launch.sh` pointing at the debug family
+before a paid run was spent on it.
+
+```bash
+gcloud compute instances get-serial-port-output <instance> \
+  --project=mcpforge-aa5c2 --zone=us-central1-a | grep "workload task ended"
+```
+
+What the tests here cannot show: that Google accepts the command, that the
+launcher accepts a digest reference and passes the `tee-env-*` values through,
+that the container can reach the metadata server for a storage credential, and
+what the real launcher's response bytes are. Those need a real run.
 
 ---
 
 ## Tests
 
-`services/api/tests/test_workload_image.py`, 53 test functions in three groups. The count is asserted by `test_the_readme_states_the_real_number_of_tests`, because a number in prose goes stale silently — this one said 33.
+`services/api/tests/test_workload_image.py`, 56 test functions in three groups. The count is asserted by `test_the_readme_states_the_real_number_of_tests`, because a number in prose goes stale silently — this one said 33.
 
 **Static** — `Dockerfile`, `Dockerfile.dockerignore` and `build.sh` as text.
 No Docker, no network.
@@ -552,11 +664,14 @@ fails if the run reports any skip at all.
 
 ## Not done here
 
-- Nothing is pushed. The Artifact Registry repository is empty.
-- No workload identity pool, OIDC provider, service account or IAM binding
-  exists — that is `F8-02b`, and no `gcloud` command that changes state was run.
-- No attestation token is obtained or verified by anything in this image, and
-  none is simulated — that is `F8-02`.
+- This tree's digest is not pushed; the registry holds only `sha256:76a88540…`
+  (pushed by the owner, 2026-09-10T18:56).
+- The workload identity setup was applied by the owner at `sha256:76a88540…`;
+  the repin to this digest and the attestation bucket are planned by `setup.sh`
+  and not applied. No `gcloud` command that changes state was run by `F8-02`.
+- The image obtains and delivers an attestation token (`F8-02`), but it has
+  never run under a real Confidential Space launcher, so no real token has been
+  obtained, delivered or verified, and none is simulated. `F8-02` stays `BLOCKED`.
 - The digest above has not been confirmed against the registry.
 - The Artifact Registry repository `mcpforge-executor` was created by the
   project owner before this ticket began. No `gcloud` command that changes state
@@ -571,9 +686,10 @@ fails if the run reports any skip at all.
 
 ## Live verification record — `F8-02b`
 
-The setup in `setup.sh` has **not been run against Google Cloud.** Nothing below
-is filled in, because filling it in before a run is how a simulation becomes a
-claim.
+`setup.sh --apply` **has been run by the project owner, at the earlier digest
+`sha256:76a88540…`.** The operator did not record the run here; the values
+below marked *observed* were read back read-only on 2026-09-11, and nothing is
+filled in that was not observed.
 
 Live verification is manual and is recorded here by the person who ran it. It is
 deliberately not a CI test: a test that talks to real infrastructure either
@@ -582,30 +698,29 @@ teach the reader something false.
 
 | What | Value |
 |---|---|
-| Date of run | *not run* |
-| Operator | *not run* |
-| `setup.sh --apply` exit status | *not run* |
-| Second run reported no changes | *not run* |
-| Workload identity pool id | *not created* |
-| OIDC provider id | *not created* |
-| Workload service account | *not created* |
-| Attribute condition as live on the provider | *not created* |
-| `setup.sh --verify` output | *not run* |
+| Date of run | *not recorded by the operator* |
+| Operator | *not recorded* |
+| `setup.sh --apply` exit status | *not recorded* |
+| Second run reported no changes | *not recorded* |
+| Workload identity pool id | `mcpforge-confidential-space` (implied by the provider below) |
+| OIDC provider id | `mcpforge-attestation` — *observed* `ACTIVE` |
+| Workload service account | `mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com` — *observed* |
+| Attribute condition as live on the provider | *observed* pinning `sha256:76a88540…` — **not** this tree's digest |
+| Attestation bucket | *observed* absent (404) |
+| `setup.sh --verify` output | *not recorded* |
 
 **What is true today**, stated so that nothing here is mistaken for progress:
 
-- No workload identity pool, OIDC provider, service account or IAM binding
-  exists in `mcpforge-aa5c2`. `setup.sh` with no arguments plans; it changes
-  nothing without `--apply`.
-- The image built by `F8-02a` has never been pushed. The registry is empty and
-  the digest pinned in the attribute condition is a local build's digest.
-- No Confidential Space VM has ever run. No attestation token has been obtained
-  by anything, from anywhere.
+- The provider pins `sha256:76a88540…`, the only pushed image. This tree's
+  digest is not pushed and not pinned; applying the repin and the bucket is the
+  owner's step, after `build.sh --push`.
+- No Confidential Space VM is running (none observed, 2026-09-11). No
+  attestation token has been obtained by anything, from anywhere.
 - Therefore `F8-02` remains `BLOCKED` on B-04 and the product reports
   `DEVELOPMENT_ISOLATION`. That is the honest state, not a placeholder for a
   better one.
 
 Filling this table in is not what completes `F8-02`. `F8-02` is complete when a
-real Confidential Space workload obtains a real token that
-`verify_attestation_token` accepts against this attribute condition — and it is
-never marked done on a simulation.
+real Confidential Space run produces a token that **the MCPForge API** verifies
+against its own pinned digest and the nonce it issued — and it is never marked
+done on a simulation or on the workload's own exit status.

@@ -207,7 +207,7 @@ must be the one built from the repository, not from a test context"
   if [[ "${push}" == "yes" ]]; then
     printf '==> Pushing %s\n' "${IMAGE}"
     docker "${canonical[@]}" \
-      --output "type=image,name=${IMAGE}:latest,push=true,rewrite-timestamp=true"
+      --output "type=image,name=${IMAGE}:latest,push=true,rewrite-timestamp=true,unpack=false"
 
     local pushed
     pushed="$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Manifest.Digest}}')"

@@ -38,7 +38,7 @@ from mcpforge.execution.attestation import (
     TrustLevel,
     verify_attestation_token,
 )
-from tests.structure import SRC, python_files
+from tests.structure import SRC, call_sites, python_files
 
 AUDIENCE = "mcpforge-run-b3f1c0"
 IMAGE_DIGEST = "sha256:" + "ab" * 32
@@ -1416,14 +1416,25 @@ def test_the_producer_is_the_verification_function_itself() -> None:
     assert upgrading[0] is functions[0].body[-1]
 
 
-def test_no_backend_module_obtains_an_attestation_token_yet() -> None:
-    """F8-02 is BLOCKED (B-04) and is not simulated.
+def test_the_only_attestation_path_is_the_relying_party() -> None:
+    """F8-02: tokens are obtained by the workload and verified only by the API.
 
-    Nothing calls the verifier in production, so nothing reports attestation.
-    When `F8-02` lands with real infrastructure, this test is replaced by that
-    ticket's integration test — it is not deleted quietly.
+    This replaces the F8-01 sweep that asserted *no* caller existed. It is not
+    deleted quietly and it is not F8-02's acceptance test: that is an
+    integration run on real Confidential Space, which has not happened, and
+    F8-02 stays `BLOCKED` until it does. What this pins is the shape of the one
+    path that now exists: the verifier is called outside this module only by
+    the relying party's `verify_delivered_run`, which only the executor calls;
+    no backend module calls the launcher client; and the workload entrypoint
+    calls the launcher client once and verifies nothing, because a workload
+    vouching for itself proves nothing. A second verifier, a self-check inside
+    the TEE or a second token source would each change one of these lists.
+
+    Same stated bound as the other sweeps here: it matches names in the AST and
+    does not defeat deliberate indirection.
     """
-    callers: list[str] = []
+    confidential_space = "mcpforge/execution/confidential_space.py"
+    verifier_callers: list[tuple[str, str]] = []
     for path in python_files():
         if path.name == "attestation.py":
             continue
@@ -1441,5 +1452,24 @@ def test_no_backend_module_obtains_an_attestation_token_yet() -> None:
                 if name in {"verify_attestation_token", "verify"} and "attestation" in ast.dump(
                     node
                 ):
-                    callers.append(f"{path.relative_to(SRC)}:{node.lineno}")
-    assert not callers, "an attestation path exists but F8-02 is blocked:\n" + "\n".join(callers)
+                    verifier_callers.append(
+                        (str(path.relative_to(SRC)), _enclosing_function(tree, node.lineno))
+                    )
+
+    assert verifier_callers == [(confidential_space, "verify_delivered_run")], verifier_callers
+    runs = [(path, fn) for path, fn, _line in call_sites("verify_delivered_run")]
+    assert runs == [(confidential_space, "verify_run_blocking")], runs
+    # The workload obtains tokens and verifies none: no backend module calls the
+    # launcher client; its only caller is the workload entrypoint, below.
+    assert call_sites("request_attestation_token") == []
+    entrypoint = SRC.parents[2] / "infra" / "confidential-space" / "entrypoint.py"
+    tree = ast.parse(entrypoint.read_text())
+    workload_calls = [
+        _enclosing_function(tree, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name | ast.Attribute)
+        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr)
+        in {"request_attestation_token", "verify_attestation_token", "verify_delivered_run"}
+    ]
+    assert workload_calls == ["attest"], workload_calls

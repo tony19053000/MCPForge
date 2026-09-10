@@ -87,7 +87,7 @@ LABEL "tee.launch_policy.monitoring_memory_allow"="never"
 
 LABEL org.opencontainers.image.title="mcpforge-confidential-space-workload"
 LABEL org.opencontainers.image.source="https://github.com/tony19053000/MCPForge"
-LABEL org.opencontainers.image.description="MCPForge secure executor workload. Preflight only; obtains no attestation token (F8-02)."
+LABEL org.opencontainers.image.description="MCPForge secure executor workload. Preflight, then obtains a Confidential Space attestation token and delivers it to the relying party; runs no repository job."
 
 # A fixed uid/gid written directly rather than via `useradd`, which stamps
 # /etc/shadow with the current day and would make the image unreproducible
@@ -108,10 +108,10 @@ ENV PYTHONPATH=/opt/mcpforge/site-packages \
     PYTHONUNBUFFERED=1 \
     HOME=/home/mcpforge
 
-# The path jail root. Present as configuration, still validated by the
-# entrypoint rather than assumed, and absent from `allow_env_override` so an
-# operator cannot relocate the jail.
-ENV MCPFORGE_WORKSPACE_ROOT=/workspace
+# The path jail root is NOT an environment variable. It is the constant
+# `WORKSPACE_ROOT` in entrypoint.py — `/workspace`, created above — so it is
+# neither operator-settable nor dependent on this image's ENV reaching the
+# process at launch. The entrypoint refuses if `MCPFORGE_WORKSPACE_ROOT` is set.
 
 # Non-root. 03_SECURITY_ACCESS.md §3. The entrypoint re-checks at runtime.
 USER 10001:10001

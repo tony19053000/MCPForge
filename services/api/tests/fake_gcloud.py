@@ -71,6 +71,8 @@ def empty_state(project_number: str = "847887912263") -> dict[str, Any]:
         "service_account": False,
         "project_bindings": [],
         "service_account_bindings": [],
+        "bucket": None,
+        "bucket_bindings": [],
     }
 
 
@@ -194,6 +196,58 @@ def _handle(argv: list[str], state: dict[str, Any]) -> tuple[int, str, bool]:
             binding = [flags["--role"], flags["--member"]]
             if binding not in state["project_bindings"]:
                 state["project_bindings"].append(binding)
+                return 0, "", True
+            return 0, "", False
+
+        case ["storage", "buckets", "describe", url]:
+            bucket = state.get("bucket")
+            if bucket is None or bucket["url"] != url:
+                return 1, "", False
+            document = {
+                "name": url.removeprefix("gs://"),
+                "storage_url": f"{url}/",
+                "location": bucket["location"],
+                "uniform_bucket_level_access": bucket["uniform_bucket_level_access"],
+                "public_access_prevention": bucket["public_access_prevention"],
+                "lifecycle_config": bucket["lifecycle_config"],
+            }
+            return 0, json.dumps(document) + "\n", False
+
+        case ["storage", "buckets", ("create" | "update") as verb, url]:
+            bucket = state.get("bucket") if verb == "update" else None
+            if verb == "update" and (bucket is None or bucket["url"] != url):
+                return 1, "", False
+            bucket = dict(bucket or {"url": url, "location": "", "lifecycle_config": None})
+            if "--location" in flags:
+                bucket["location"] = flags["--location"].upper()
+            bucket["uniform_bucket_level_access"] = "--uniform-bucket-level-access" in flags or (
+                verb == "update" and bool(bucket.get("uniform_bucket_level_access"))
+            )
+            if "--public-access-prevention" in flags:
+                bucket["public_access_prevention"] = "enforced"
+            else:
+                bucket.setdefault("public_access_prevention", "inherited")
+            if "--lifecycle-file" in flags:
+                bucket["lifecycle_config"] = json.loads(
+                    Path(flags["--lifecycle-file"]).read_text(encoding="utf-8")
+                )
+            state["bucket"] = bucket
+            return 0, "", True
+
+        case ["storage", "buckets", "get-iam-policy", url]:
+            bucket = state.get("bucket")
+            if bucket is None or bucket["url"] != url:
+                return 1, "", False
+            return 0, _bindings_output(state.get("bucket_bindings", [])), False
+
+        case ["storage", "buckets", "add-iam-policy-binding", url]:
+            bucket = state.get("bucket")
+            if bucket is None or bucket["url"] != url:
+                return 1, "", False
+            binding = [flags["--role"], flags["--member"]]
+            bindings = state.setdefault("bucket_bindings", [])
+            if binding not in bindings:
+                bindings.append(binding)
                 return 0, "", True
             return 0, "", False
 

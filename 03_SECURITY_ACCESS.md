@@ -171,13 +171,72 @@ both builds shared the thing that varied:
 The recorded digest in the README is itself asserted against the built one
 (`test_the_readme_records_the_digest_that_is_actually_built`).
 
-**Nothing has been pushed and no digest is pinned.** The image obtains no
-attestation token, runs no repository job, and has never been launched by
-Confidential Space; the labels are asserted present and correct on the image, and
-their enforcement is Confidential Space's and has not been observed. Blocker B-04
-stands.
+**Live state (observed read-only, 2026-09-11).** The owner pushed
+`sha256:76a88540…` on 2026-09-10T18:56 and applied the workload identity setup
+at that digest: the `mcpforge-attestation` provider is live and its condition
+pins `76a88540…`. The current tree's image has a different digest, which is
+neither pushed nor pinned, and the attestation bucket does not exist yet. The
+image has never been launched by Confidential Space; the launch-policy labels
+are asserted on the image and their enforcement has not been observed. Blocker
+B-04 stands.
 
-`attestation.py` verifies a token; it never obtains one. Acquiring a real Confidential Space token is `F8-02`, which is `BLOCKED` on blocker B-04 and is not simulated. Nothing in the backend calls the verifier yet, so nothing reports `HARDWARE_ATTESTED`; a test asserts that too. Verification also cannot prove a token was minted for *this* process rather than replayed — the audience nonce is the mechanism, and binding it is `F8-02`'s job.
+**Who verifies (F8-02; the ticket stays `BLOCKED`).** Attestation means
+something only to a relying party **outside** the TEE: a workload that checks
+its own token proves nothing, because a malicious image would simply report
+success. So the workload verifies nothing. The MCPForge API is the relying
+party:
+
+1. The API issues each run — a run id and a random audience, the nonce — and
+   records it pending. The verifier chose the nonce, which is what makes replay
+   protection mean anything. `launch.sh` can only launch a run the API issued
+   (`test_a_run_the_relying_party_did_not_issue_cannot_be_launched`).
+2. The workload requests a token from the Confidential Space launcher only
+   (`POST /v1/token` on `/run/container_launcher/teeserver.sock`) with that
+   audience, and writes the raw token to the private object
+   `gs://mcpforge-aa5c2-attestation/attestation/<run id>.jwt`, create-only.
+   Every launcher failure — missing, refused, hung up, timed out, non-200, over
+   64 KiB, empty, or not exactly one compact JWS — yields no token. The
+   workload's storage credential comes from the metadata server in one module,
+   `token_delivery.py`, kept apart from token retrieval; the metadata identity
+   endpoint, a VM identity rather than an attestation, is used nowhere
+   (`test_the_metadata_server_is_reached_only_by_the_delivery_transport`).
+3. The API fetches the object with its own ADC and verifies it with
+   `verify_attestation_token` against the audience **it** issued, the image
+   digest from **its own** configuration (`CONFIDENTIAL_SPACE_IMAGE_DIGEST`,
+   never an operator value), the workload service account, and Google's keys.
+   The run is consumed atomically on first read, so a replay — sequential or
+   concurrent — is refused (`test_a_run_verifies_once_and_a_replay_is_refused`,
+   `test_two_concurrent_verifiers_cannot_both_consume_a_run`). Every refusal —
+   an unissued, consumed or expired run, a missing, unreadable or malformed
+   object, another run's audience, a digest other than the API's, another
+   workload identity, an expired or debug token — leaves the API and the trust
+   panel at `DEVELOPMENT_ISOLATION` (`test_every_refusal_leaves_the_api_and_panel_unattested`,
+   over a matrix derived from the failure enum). Only a successful
+   verification raises the executor's level, through F8-01's single producer.
+4. The executor runs no job even then: the attested workload has no job
+   runner, and running a job on the API host under an attested label would
+   claim a boundary the job was never inside.
+
+**The bucket is transport, not a trust anchor.** The token is signed by Google,
+so whoever could write the object could at most deliver a token that fails
+verification. It is still private: uniform bucket-level access, public access
+prevention enforced, objects deleted after a day, and the workload holds only
+bucket-scoped `roles/storage.objectCreator` — it cannot read, overwrite or
+delete (`infra/confidential-space/policy.md`).
+
+**The token appears in no log on either side.** Only a 16-character SHA-256
+prefix and the length are recorded. `test_the_token_never_appears_in_any_output`
+plants recognisable tokens and a recognisable access token and searches
+structlog events (before any redaction), stdlib logging, fd-level stdout and
+stderr, exception messages, `repr`s, the entrypoint's JSON and the API's
+responses, workload side and API side, success and failure.
+`log_redirect=never` is unchanged.
+
+**What remains unproven.** The tests run every production function on the path
+against local stand-ins for the launcher, the metadata server and Cloud
+Storage, with F8-01's test key. That is not attestation: `F8-02` completes only
+when a real Confidential Space run produces a token that the API verifies
+against its own pinned digest and issued nonce.
 
 The "exactly one producer" rule is enforced by an AST sweep over every backend module, matching the attribute, the bare name and the string literal. Like the approval sweep in §6 of `02_ARCHITECTURE.md`, it matches on names: it catches straightforwardly-written code and does not defeat deliberate indirection such as `getattr(TrustLevel, name)`. The guarantee is that sweep **plus** the behavioural tests that every rejection path returns `DEVELOPMENT_ISOLATION`.
 

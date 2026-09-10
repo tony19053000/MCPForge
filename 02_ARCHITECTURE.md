@@ -290,7 +290,7 @@ Implementations:
 - `DevelopmentSecureExecutor` — ephemeral workspace destroyed by a context manager on success *and* failure; path jail resolving symlinks first; executable allowlist with argument arrays only; a minimal environment so a job cannot read our credentials; CPU, memory, file-size and wall-clock limits, the last enforced by killing the whole process group; and **real network denial** via an unprivileged user+network namespace. Where the kernel disallows unprivileged namespaces the executor **refuses to run** rather than proceeding without the isolation it claims — `network_isolation_available` reports which case applies. `attestation()` returns `None`. Trust level `DEVELOPMENT_ISOLATION`.
 
   What it is *not*: an allowlisted `node` or `python3` can still read any file the running user can read. That is inherent to development isolation and is why the production target is Confidential Space.
-- `ConfidentialSpaceSecureExecutor` — Google Confidential Space target. Phase 8. Returns real attestation evidence or nothing.
+- `ConfidentialSpaceSecureExecutor` (`execution/confidential_space.py`, F8-02) — the **relying party's** executor, in the API service. It never sees the TEE directly: the workload requests a token from the Confidential Space launcher with an audience the API issued and writes it to a private bucket object; `verify_run` fetches that object and verifies it with `verify_attestation_token` against the API's issued audience, the digest in the API's **own** configuration, the workload service account and Google's discovery-document keys, consuming the run so it verifies once. `trust_level` is the verified outcome's level while its `exp` holds, else `DEVELOPMENT_ISOLATION`; `attestation()` returns F8-01's evidence or `None`. It runs **no** job in any state — `AttestationRequiredError` without evidence, `NoAttestedJobRunnerError` with it — because the attested workload has no job runner and a job on the API host is not inside the attested boundary. The workload's own exit status is a self-report about delivery, not attestation. `F8-02` stays `BLOCKED` until a real run produces a token the API verifies.
 
 **Trust levels are an enum with exactly one meaning each:** `DEVELOPMENT_ISOLATION` and `HARDWARE_ATTESTED`. `HARDWARE_ATTESTED` is only ever set by code that has actually verified an attestation token. There is no path that sets it optimistically, and the UI renders the enum, not a boolean.
 
@@ -335,11 +335,24 @@ three separate clock and cache leaks found and closed in review — and prints t
 digest. `--push` **would** publish and then verify that the registry reports the
 same digest; that path has never been run.
 `services/api/tests/test_workload_image.py` builds the real image and reads the
-real layers of it. **The image has not been pushed and no digest is pinned yet**;
-the workload performs preflight only and obtains no attestation token, which
-remains `F8-02`. See `03_SECURITY_ACCESS.md` §2.
+real layers of it. The owner pushed an earlier build (`sha256:76a88540…`); the
+current tree's digest in the README is a local build's and is not pushed. Since
+`F8-02` the workload runs preflight, then obtains an attestation token and
+delivers it to the relying party; it verifies nothing and has never run under
+a real launcher. See `03_SECURITY_ACCESS.md` §2.
 
-`execution/attestation.py` (F8-01) owns that definition: `TrustLevel`, `AttestationEvidence`, `AttestationPolicy`, `AttestationFailure`, the `AttestationVerifier` and `AttestationKeyResolver` ports, and `verify_attestation_token` — the only function that may produce `HARDWARE_ATTESTED`, and only after signature, algorithm, issuer, audience, expiry, workload identity, image digest, hardware model and debug status have all passed. `provider.py` re-exports the two types so executors keep one import. Every failure yields `DEVELOPMENT_ISOLATION` with a reason. The module verifies a token it is handed and contains no way to obtain one; that is `F8-02`, blocked on B-04 and not simulated. See `03_SECURITY_ACCESS.md` §2.
+**Launch configuration (F8-02).** Every name in the entrypoint's
+`REQUIRED_ENVIRONMENT` — run id and audience, both issued by the API — is a
+per-launch `tee-env-*` value in the image's two-name `allow_env_override`,
+passed by `infra/confidential-space/launch.sh` (plan-only by default) from the
+API's run record.
+`test_every_required_name_is_supplied_by_exactly_one_source` checks, against the
+built image and the launch plan, that each is supplied by exactly one source
+and that every `tee-env-*` name is allowed. The path jail root is no longer an
+environment variable: it is the constant `/workspace` in `entrypoint.py`, still
+not operator-settable and still checked for existence and writability.
+
+`execution/attestation.py` (F8-01) owns that definition: `TrustLevel`, `AttestationEvidence`, `AttestationPolicy`, `AttestationFailure`, the `AttestationVerifier` and `AttestationKeyResolver` ports, and `verify_attestation_token` — the only function that may produce `HARDWARE_ATTESTED`, and only after signature, algorithm, issuer, audience, expiry, workload identity, image digest, hardware model and debug status have all passed. `provider.py` re-exports the two types so executors keep one import. Every failure yields `DEVELOPMENT_ISOLATION` with a reason. The module verifies a token it is handed and never obtains one; its one production caller is the relying party's `verify_delivered_run` in `confidential_space.py`, and the workload calls no verifier at all (`test_the_only_attestation_path_is_the_relying_party`). See `03_SECURITY_ACCESS.md` §2.
 
 ## 9. GitHub integration
 

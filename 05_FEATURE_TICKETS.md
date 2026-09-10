@@ -503,12 +503,13 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Purpose.** The production confidential execution path.
 **Files.** `services/api/src/mcpforge/execution/confidential_space.py`
 **Dependencies.** F8-01, F8-02a, F8-02b
-**Implementation.** Google Confidential Space implementation of `SecureExecutionProvider`, returning real attestation evidence.
-**Acceptance criteria.** Real attestation is obtained and verified before `HARDWARE_ATTESTED` is set; failure to attest falls back to refusing the job, not to claiming isolation it does not have.
+**Implementation.** Google Confidential Space implementation of `SecureExecutionProvider`, whose evidence comes from a relying party **outside** the TEE. The channel is part of this ticket (scope recorded in `01_PRD.md` §8): the API issues each run's id and audience (the nonce); `launch.sh` boots the VM only with an issued run; the workload obtains a token from the launcher and writes it to `gs://mcpforge-aa5c2-attestation/attestation/<run id>.jwt`; the API fetches it and verifies it with `verify_attestation_token` against its issued audience, its own configured image digest, the workload service account and Google's keys, once per run. The bucket and a bucket-scoped `roles/storage.objectCreator` grant are in `setup.sh`, plan-only.
+**Acceptance criteria.** Real attestation is obtained and verified **by the API service** before `HARDWARE_ATTESTED` is set; failure to attest falls back to refusing the job, not to claiming isolation it does not have. A verification inside the TEE, or the workload's exit status, never satisfies this.
 **Tests.** Integration test against real Confidential Space infrastructure. **These tests cannot be simulated** — a mocked attestation proves nothing about this ticket.
 **Security.** T7 control.
 **Note.** Requires real GCP infrastructure and credentials (blocker B-04). It is never marked done on a simulation.
-**Status.** `BLOCKED`
+**Code side (implemented, not accepted).** Launcher client, workload delivery (`token_delivery.py`), relying party (`mcpforge/relying_party/`, `verify_delivered_run`, `POST /api/attestation-runs/{id}/verify`), plan-only `launch.sh` and `setup.sh` bucket steps. Tested end to end against local stand-ins for the launcher, the metadata server and Cloud Storage with F8-01's test key — transport, not attestation, and not the acceptance criterion.
+**Status.** `BLOCKED` — completes only when a real Confidential Space run produces a token that **the API service** verifies against its own pinned digest and the nonce it issued. `launch.sh` uses the production `confidential-space` family, because the debug family reports `dbgstat=enabled` and the API refuses it with `DEBUG_MODE_ENABLED`, which is not `HARDWARE_ATTESTED` and does not complete the ticket.
 
 ### F8-02a — Confidential Space workload image
 **Purpose.** Produce the container image that actually runs inside Confidential Space, so that an image digest exists to pin and to attest. Without it there is nothing for `F8-01` to verify a digest against.
@@ -518,7 +519,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** The image builds from a clean checkout; the pushed digest is recorded in the README and is the value the deployment pins; the image contains no credential, no `.env` and no ADC file; the entrypoint refuses to start when required configuration is absent rather than starting with defaults.
 **Tests.** A build test; a layer-inspection test asserting no secret-shaped file and no `.env` is present in any layer; an entrypoint test for the missing-configuration refusal. All run against a locally built image and require no GCP.
 **Security.** The image *is* the attested artifact. Anything baked into it sits inside the trust boundary, so the secret-absence test is a T7 control, not hygiene.
-**Note.** The image is built but **not pushed** — the registry is empty and the recorded digest is a local one. Pushing is a spend decision for the project owner and `build.sh --push` verifies the registry digest against the local build before accepting it.
+**Note.** The image is built but **not pushed** — the registry is empty and the recorded digest is a local one. Pushing is a spend decision for the project owner and `build.sh --push` verifies the registry digest against the local build before accepting it. *Since then (observed read-only, 2026-09-11):* the owner pushed `sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db`, the only image in the registry; `F8-02` moved the local digest to `sha256:cebf7ea1…`, which is not pushed.
 **Status.** `DONE` — `PASS` on the seventh review round. The Dockerfile text scanner keeps one documented bound: it cannot follow a variable-constructed name. The controls carrying the guarantee are the pinned reproducible digest, the layer-content scan and `F8-01`'s verification, not that scanner.
 
 ### F8-02b — Confidential Space infrastructure and workload identity
@@ -530,7 +531,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Tests.** An idempotency check (run twice, diff the resulting IAM policy); a consistency test asserting every attribute condition in the script appears in `policy.md` and vice versa. Live verification against real GCP is manual, and is recorded in the README with the date and the operator — it is not a CI test and is never simulated.
 **Security.** A permissive attribute condition silently converts hardware attestation into no attestation at all. The wildcard case is the specific thing these tests exist to prevent.
 **Note.** Requires the real GCP project and billing. `F8-02a` and `F8-02b` together are the work that clears blocker B-04. Until they and `F8-02` pass, the product continues to report `DEVELOPMENT_ISOLATION`.
-**Status.** `DONE` — `PASS` on the second review round. The script is written and its plan verified against live GCP; **it has never been run with `--apply`**, so no pool, provider, service account or binding exists. Running it is the project owner's decision and is recorded in the README's live-verification table.
+**Status.** `DONE` — `PASS` on the second review round. The script is written and its plan verified against live GCP; **it has never been run with `--apply`**, so no pool, provider, service account or binding exists. Running it is the project owner's decision and is recorded in the README's live-verification table. *Since then (observed read-only, 2026-09-11):* the owner applied it at `sha256:76a88540…`; the `mcpforge-attestation` provider is live and pinned to that digest. The repin to `F8-02`'s digest and the attestation bucket are planned and not applied.
 
 ### F8-03 — Trust panel
 **Purpose.** Show the user the real security state, and never a flattering version of it.

@@ -7,10 +7,11 @@ against the two ways it could flatter:
   from anywhere but the filtering pipeline's own record;
 - reporting an execution boundary better than the one in force.
 
-Every fabricated attestation below is fabricated *by the test*. Nothing in the
-product can produce one: `F8-02` is blocked on B-04, and
-`test_no_backend_module_obtains_an_attestation_token_yet` in `test_attestation.py`
-is what keeps that true.
+Every fabricated attestation below is fabricated *by the test*. The API service
+cannot produce one: the only production path to a verified token is the F8-02
+executor inside the Confidential Space workload, which the service does not
+run, and `test_the_only_attestation_path_is_the_relying_party` in
+`test_attestation.py` pins that it is the only path.
 """
 
 from __future__ import annotations

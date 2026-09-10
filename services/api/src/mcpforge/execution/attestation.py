@@ -50,17 +50,21 @@ code did not have:
    own AST by `test_every_claim_the_module_reads_has_hostile_shapes` rather than
    from recall — `nbf` was missed twice precisely because a list was written
    from memory.
-3. **No token source exists.** This module verifies a token it is handed. It
-   never obtains one. Fetching a real Confidential Space token is `F8-02`, which
-   is `BLOCKED` on real GCP infrastructure (blocker B-04) and is not simulated.
-   Nothing in MCPForge calls `verify_attestation_token` in production, asserted
-   by `test_no_backend_module_obtains_an_attestation_token_yet`, so nothing
-   reports `HARDWARE_ATTESTED`.
+3. **This module never obtains a token.** It verifies a token it is handed.
+   The one production caller is the relying party's `verify_delivered_run` in
+   `execution/confidential_space.py` (F8-02), which runs in the API service,
+   outside the TEE, on a token the workload delivered; the workload itself
+   calls no verifier. `test_the_only_attestation_path_is_the_relying_party`
+   fails if a second caller appears. F8-02 stays `BLOCKED` until a real
+   Confidential Space run has produced a token the API accepts here; that is
+   not simulated.
 
 **What this module does not prove.** Verifying a token proves the token is
 authentic and describes the expected workload. It cannot prove the token was
 issued for *this* process rather than replayed from another — that is what the
-caller-supplied `audience` nonce is for, and binding it is `F8-02`'s job.
+caller-supplied `audience` nonce is for. It protects against replay only when
+the verifier chose the nonce: in F8-02 the API issues each run's audience,
+verifies against its own record of it, and verifies each run once.
 """
 
 from __future__ import annotations
@@ -143,8 +147,9 @@ class AttestationPolicyError(ValueError):
 class AttestationPolicy:
     """Exactly what a token must say before it counts as verified."""
 
-    #: The nonce/audience this token was requested with. Rejects replay of a
-    #: token minted for a different consumer.
+    #: The audience the token must carry. Rejects a token minted for a
+    #: different consumer; it is replay protection only when the verifier
+    #: issued this value and verifies each run once, as F8-02's relying party does.
     audience: str
     #: `sha256:<64 hex>` of the workload image we expect to be running. Accepted
     #: here in any case and with surrounding whitespace, because a developer
@@ -292,9 +297,9 @@ class ConfidentialSpaceAttestationVerifier:
     """Binds a policy to a key source. Verifies; never fetches.
 
     This class holds no token-acquisition path — it cannot produce an outcome
-    without being handed a token by a caller that obtained one for real — and
-    nothing in the backend calls it yet, asserted by
-    `test_no_backend_module_obtains_an_attestation_token_yet`.
+    without being handed a token by a caller that obtained one for real. The
+    F8-02 executor calls `verify_attestation_token` directly rather than this
+    class; `test_the_only_attestation_path_is_the_relying_party` pins that.
     """
 
     policy: AttestationPolicy

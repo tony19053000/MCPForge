@@ -27,6 +27,7 @@ break.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import io
 import json
@@ -36,12 +37,19 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import IO, Any, NamedTuple
 
+import jwt
 import pytest
+
+import tests.test_confidential_space as launcher_stub
+from tests.launch_plan import load_entrypoint, run_launch_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INFRA_DIR = REPO_ROOT / "infra" / "confidential-space"
@@ -62,13 +70,14 @@ EXIT_CONFIG_MISSING = 10
 EXIT_CONFIG_INVALID = 11
 EXIT_CREDENTIAL_PRESENT = 13
 EXIT_WORKSPACE_UNUSABLE = 14
+EXIT_ATTESTATION_UNAVAILABLE = 16
+EXIT_DELIVERY_FAILED = 17
 
 #: A configuration that satisfies every requirement, so a test can remove
 #: exactly one thing and attribute the refusal to that removal.
 GOOD_CONFIG: dict[str, str] = {
     "MCPFORGE_RUN_ID": "run-f8-02a-0001",
     "MCPFORGE_ATTESTATION_AUDIENCE": "1f0c7d2a9b4e6f81c3a5",
-    "MCPFORGE_WORKSPACE_ROOT": "",  # filled per-test; the container bakes its own
 }
 
 #: Credential-shaped names, for the layer scan. This list is deliberately a
@@ -899,7 +908,15 @@ def test_the_image_carries_the_executor_and_not_the_service(image_config: dict[s
     assert any(name.endswith("mcpforge/execution/development.py") for name in modules), (
         "the secure executor is not in the image"
     )
-    for forbidden in ("mcpforge/api/", "mcpforge/agents/", "mcpforge/gemini/", "mcpforge/github/"):
+    # The relying party verifies the workload's token; it must not ship inside
+    # the thing it judges.
+    for forbidden in (
+        "mcpforge/api/",
+        "mcpforge/agents/",
+        "mcpforge/gemini/",
+        "mcpforge/github/",
+        "mcpforge/relying_party/",
+    ):
         offenders = sorted(name for name in modules if forbidden in name)
         assert not offenders, f"{forbidden} should not be inside the trust boundary: {offenders}"
     for forbidden_package in ("fastapi/", "uvicorn/", "google/genai/", "tree_sitter/"):
@@ -942,7 +959,6 @@ EXPECTED_IMAGE_ENV: dict[str, str] = {
     "PYTHONDONTWRITEBYTECODE": "1",
     "PYTHONUNBUFFERED": "1",
     "HOME": "/home/mcpforge",
-    "MCPFORGE_WORKSPACE_ROOT": "/workspace",
 }
 
 #: `rewrite-timestamp=true` with `SOURCE_DATE_EPOCH=0` stamps every layer this
@@ -1009,7 +1025,8 @@ EXPECTED_STAGE_HISTORY: tuple[str, ...] = (
     "LABEL org.opencontainers.image.title=mcpforge-confidential-space-workload",
     "LABEL org.opencontainers.image.source=https://github.com/tony19053000/MCPForge",
     "LABEL org.opencontainers.image.description=MCPForge secure executor workload. "
-    "Preflight only; obtains no attestation token (F8-02).",
+    "Preflight, then obtains a Confidential Space attestation token and delivers it to "
+    "the relying party; runs no repository job.",
     "RUN /bin/sh -c printf 'mcpforge:x:10001:\\n' >> /etc/group     && printf "
     "'mcpforge:x:10001:10001::/home/mcpforge:/usr/sbin/nologin\\n' >> /etc/passwd     "
     "&& mkdir -p /home/mcpforge /opt/mcpforge /workspace     && chown 10001:10001 "
@@ -1018,7 +1035,6 @@ EXPECTED_STAGE_HISTORY: tuple[str, ...] = (
     "COPY --chown=10001:10001 /build/app/entrypoint.py /opt/mcpforge/entrypoint.py # buildkit",
     "ENV PYTHONPATH=/opt/mcpforge/site-packages PYTHONDONTWRITEBYTECODE=1 "
     "PYTHONUNBUFFERED=1 HOME=/home/mcpforge",
-    "ENV MCPFORGE_WORKSPACE_ROOT=/workspace",
     "USER 10001:10001",
     "WORKDIR /opt/mcpforge",
     'ENTRYPOINT ["python3" "/opt/mcpforge/entrypoint.py"]',
@@ -2130,10 +2146,11 @@ def _run_entrypoint_on_host(environment: dict[str, str]) -> subprocess.Completed
     )
 
 
-@pytest.mark.parametrize("absent", ["MCPFORGE_RUN_ID", "MCPFORGE_ATTESTATION_AUDIENCE"])
-def test_the_entrypoint_refuses_when_a_required_value_is_absent(
-    absent: str, tmp_path: Path
-) -> None:
+@pytest.mark.parametrize(
+    "absent",
+    ["MCPFORGE_RUN_ID", "MCPFORGE_ATTESTATION_AUDIENCE"],
+)
+def test_the_entrypoint_refuses_when_a_required_value_is_absent(absent: str) -> None:
     """Acceptance: refuses to start when configuration is absent.
 
     One value is removed at a time from a configuration that is otherwise
@@ -2142,7 +2159,6 @@ def test_the_entrypoint_refuses_when_a_required_value_is_absent(
     """
 
     environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path)
     del environment[absent]
 
     result = _run_entrypoint_on_host(environment)
@@ -2153,40 +2169,54 @@ def test_the_entrypoint_refuses_when_a_required_value_is_absent(
     assert absent in payload["detail"]
 
 
-def test_a_blank_required_value_counts_as_absent(tmp_path: Path) -> None:
-    """`-e VAR=` is how an operator unsets a baked ENV. It must not be a default."""
+def test_a_blank_required_value_counts_as_absent() -> None:
+    """`-e VAR=` is how an operator blanks a value. It must not be a default."""
 
     environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path)
     environment["MCPFORGE_ATTESTATION_AUDIENCE"] = "   "
 
     result = _run_entrypoint_on_host(environment)
     assert result.returncode == EXIT_CONFIG_MISSING, result.stdout + result.stderr
 
 
-def test_the_complete_configuration_is_accepted_on_the_host(tmp_path: Path) -> None:
-    """The negative tests above are only meaningful if the positive one passes.
+@pytest.mark.parametrize("value", ["/", "", "/workspace"])
+def test_the_entrypoint_refuses_any_attempt_to_move_the_jail(value: str) -> None:
+    """`MCPFORGE_WORKSPACE_ROOT` is not configuration any more; present is a refusal.
 
-    Without this, a refusal for an unrelated reason would satisfy every test in
-    this group.
+    Even the right value, and even blank: a launch that still sets it expects to
+    control the jail, and is told it cannot rather than silently ignored.
     """
 
-    environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path)
-    environment["HOME"] = str(tmp_path)
-    # The host checkout is not the image: point the payload check at the source
-    # tree the image vendors.
-    environment["PYTHONPATH"] = str(REPO_ROOT / "services" / "api" / "src")
+    result = _run_entrypoint_on_host({**GOOD_CONFIG, "MCPFORGE_WORKSPACE_ROOT": value})
+    assert result.returncode == EXIT_CONFIG_INVALID, result.stdout + result.stderr
+    assert "MCPFORGE_WORKSPACE_ROOT" in json.loads(result.stdout)["detail"]
 
-    result = _run_entrypoint_on_host(environment)
-    assert result.returncode == EXIT_OK, result.stdout + result.stderr
-    payload = json.loads(result.stdout)
-    assert payload["status"] == "PREFLIGHT_OK"
-    assert payload["attestation_token_obtained"] is False
-    assert payload["job_runner_present"] is False
-    assert "trust_level" not in payload, (
-        "the workload has verified no attestation, so it reports no trust level"
+
+def test_the_complete_configuration_passes_preflight_on_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The negative tests above are only meaningful if the positive one passes.
+
+    In process rather than as a subprocess, because the jail root is now the
+    constant `/workspace`, which a developer's machine does not have;
+    `preflight` takes the root as a parameter for exactly this, and `main`
+    always passes the constant. The attestation step is exercised in
+    `test_confidential_space.py` and, in the real image, below.
+    """
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    jail = tmp_path / "jail"
+    jail.mkdir()
+
+    config, record = load_entrypoint().preflight(dict(GOOD_CONFIG), workspace_root=jail)
+
+    assert config == GOOD_CONFIG
+    assert record["workspace_root"] == str(jail)
+    assert record["workload"] == (
+        "mcpforge.execution.confidential_space.ConfidentialSpaceSecureExecutor"
     )
+    assert record["job_runner_present"] is False
+    assert "trust_level" not in record, "preflight verifies nothing, so it reports no trust level"
 
 
 @pytest.mark.parametrize(
@@ -2197,7 +2227,7 @@ def test_the_complete_configuration_is_accepted_on_the_host(tmp_path: Path) -> N
     ],
 )
 def test_the_entrypoint_refuses_an_audience_that_is_not_a_usable_nonce(
-    audience: str, why: str, tmp_path: Path
+    audience: str, why: str
 ) -> None:
     """The audience is what stops an attestation token being replayed.
 
@@ -2208,7 +2238,6 @@ def test_the_entrypoint_refuses_an_audience_that_is_not_a_usable_nonce(
     """
 
     environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path)
     environment["MCPFORGE_ATTESTATION_AUDIENCE"] = audience
 
     result = _run_entrypoint_on_host(environment)
@@ -2225,10 +2254,9 @@ def test_the_entrypoint_refuses_an_audience_that_is_not_a_usable_nonce(
     ],
 )
 def test_the_entrypoint_refuses_a_run_id_that_is_not_a_safe_path_component(
-    run_id: str, why: str, tmp_path: Path
+    run_id: str, why: str
 ) -> None:
     environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path)
     environment["MCPFORGE_RUN_ID"] = run_id
 
     result = _run_entrypoint_on_host(environment)
@@ -2239,7 +2267,6 @@ def test_the_entrypoint_refuses_key_file_adc(tmp_path: Path) -> None:
     """03_SECURITY_ACCESS.md §9: key-file ADC is not a supported configuration."""
 
     environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path)
     environment["HOME"] = str(tmp_path)
     environment["GOOGLE_APPLICATION_CREDENTIALS"] = "/nonexistent/key.json"
 
@@ -2248,35 +2275,47 @@ def test_the_entrypoint_refuses_key_file_adc(tmp_path: Path) -> None:
     assert json.loads(result.stdout)["reason"] == "CREDENTIAL_PRESENT"
 
 
-def test_the_entrypoint_refuses_an_unusable_workspace_root(tmp_path: Path) -> None:
-    environment = dict(GOOD_CONFIG)
-    environment["MCPFORGE_WORKSPACE_ROOT"] = str(tmp_path / "does-not-exist")
-    environment["HOME"] = str(tmp_path)
-    environment["PYTHONPATH"] = str(REPO_ROOT / "services" / "api" / "src")
+def test_the_entrypoint_refuses_an_unusable_workspace_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entrypoint = load_entrypoint()
 
-    result = _run_entrypoint_on_host(environment)
-    assert result.returncode == EXIT_WORKSPACE_UNUSABLE, result.stdout + result.stderr
+    with pytest.raises(entrypoint.RefusalError) as caught:
+        entrypoint.preflight(dict(GOOD_CONFIG), workspace_root=tmp_path / "does-not-exist")
+
+    assert caught.value.code == EXIT_WORKSPACE_UNUSABLE
 
 
 # --- the same refusals, in the real container ------------------------------
 
 
-def test_the_container_starts_clean_with_its_baked_configuration(built_image: str) -> None:
-    """The image as shipped, given only the two values an operator supplies."""
+def test_the_container_passes_preflight_and_refuses_without_a_launcher(built_image: str) -> None:
+    """The image as shipped, with the two relying-party-issued values and no launcher.
 
-    result = _docker_run(
-        built_image,
-        {
-            "MCPFORGE_RUN_ID": GOOD_CONFIG["MCPFORGE_RUN_ID"],
-            "MCPFORGE_ATTESTATION_AUDIENCE": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
-        },
-    )
-    assert result.returncode == EXIT_OK, result.stdout + result.stderr
+    Plain Docker has no Confidential Space launcher, so no token can be
+    obtained: the image must get through every preflight check and then refuse
+    at exactly the attestation step, rather than start. The preflight record
+    rides along in the refusal so this is visible. The workload names no trust
+    level in any outcome: only the relying party's verification can.
+    """
+
+    result = _docker_run(built_image, dict(GOOD_CONFIG))
+    assert result.returncode == EXIT_ATTESTATION_UNAVAILABLE, result.stdout + result.stderr
+    assert result.stdout.count("\n") == 1, "stdout must be one JSON line; logs go to stderr"
     payload = json.loads(result.stdout)
-    assert payload["status"] == "PREFLIGHT_OK"
-    assert payload["uid"] == 10001, "the container is not running as the workload user"
-    assert payload["workspace_root"] == "/workspace"
-    assert payload["workload"] == "mcpforge.execution.development.DevelopmentSecureExecutor"
+    assert payload["reason"] == "ATTESTATION_UNAVAILABLE"
+    assert payload["attestation"]["retrieval_failure"] == "SOCKET_UNAVAILABLE"
+    assert payload["attestation"]["token_obtained"] is False
+    assert payload["attestation"]["delivered_to"] is None
+    assert "trust_level" not in payload["attestation"], "the workload claims nothing"
+    assert "HARDWARE_ATTESTED" not in result.stdout + result.stderr
+    preflight = payload["preflight"]
+    assert preflight["uid"] == 10001, "the container is not running as the workload user"
+    assert preflight["workspace_root"] == "/workspace"
+    assert preflight["workload"] == (
+        "mcpforge.execution.confidential_space.ConfidentialSpaceSecureExecutor"
+    )
 
 
 def test_the_container_refuses_with_no_operator_configuration(built_image: str) -> None:
@@ -2286,32 +2325,21 @@ def test_the_container_refuses_with_no_operator_configuration(built_image: str) 
     assert result.returncode == EXIT_CONFIG_MISSING, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["reason"] == "CONFIG_MISSING"
-    assert "MCPFORGE_RUN_ID" in payload["detail"]
-    assert "MCPFORGE_ATTESTATION_AUDIENCE" in payload["detail"]
+    for name in GOOD_CONFIG:
+        assert name in payload["detail"]
 
 
-def test_the_container_refuses_when_the_baked_workspace_root_is_blanked(built_image: str) -> None:
-    """A baked ENV is still validated. `-e VAR=` must not fall back to a default."""
+def test_the_container_refuses_an_operator_supplied_workspace_root(built_image: str) -> None:
+    """The jail cannot be moved in the artefact either — not even to `/`."""
 
-    result = _docker_run(
-        built_image,
-        {
-            "MCPFORGE_RUN_ID": GOOD_CONFIG["MCPFORGE_RUN_ID"],
-            "MCPFORGE_ATTESTATION_AUDIENCE": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
-            "MCPFORGE_WORKSPACE_ROOT": "",
-        },
-    )
-    assert result.returncode == EXIT_CONFIG_MISSING, result.stdout + result.stderr
+    result = _docker_run(built_image, {**GOOD_CONFIG, "MCPFORGE_WORKSPACE_ROOT": "/"})
+    assert result.returncode == EXIT_CONFIG_INVALID, result.stdout + result.stderr
 
 
 def test_the_container_refuses_key_file_adc(built_image: str) -> None:
     result = _docker_run(
         built_image,
-        {
-            "MCPFORGE_RUN_ID": GOOD_CONFIG["MCPFORGE_RUN_ID"],
-            "MCPFORGE_ATTESTATION_AUDIENCE": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
-            "GOOGLE_APPLICATION_CREDENTIALS": "/var/run/secrets/key.json",
-        },
+        {**GOOD_CONFIG, "GOOGLE_APPLICATION_CREDENTIALS": "/var/run/secrets/key.json"},
     )
     assert result.returncode == EXIT_CREDENTIAL_PRESENT, result.stdout + result.stderr
 
@@ -2324,14 +2352,7 @@ def test_the_container_refuses_to_run_as_root(built_image: str) -> None:
     the workload root.
     """
 
-    result = _docker_run(
-        built_image,
-        {
-            "MCPFORGE_RUN_ID": GOOD_CONFIG["MCPFORGE_RUN_ID"],
-            "MCPFORGE_ATTESTATION_AUDIENCE": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
-        },
-        extra_args=("--user", "0:0"),
-    )
+    result = _docker_run(built_image, dict(GOOD_CONFIG), extra_args=("--user", "0:0"))
     assert result.returncode == 12, result.stdout + result.stderr
     assert json.loads(result.stdout)["reason"] == "RUNNING_AS_ROOT"
 
@@ -2344,15 +2365,111 @@ def test_the_container_has_no_gemini_or_github_configuration(built_image: str) -
     inside the trust boundary and covered by the attested digest.
     """
 
-    result = _docker_run(
-        built_image,
-        {
-            "MCPFORGE_RUN_ID": GOOD_CONFIG["MCPFORGE_RUN_ID"],
-            "MCPFORGE_ATTESTATION_AUDIENCE": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
-        },
-    )
-    assert result.returncode == EXIT_OK
+    result = _docker_run(built_image, dict(GOOD_CONFIG))
+    assert result.returncode == EXIT_ATTESTATION_UNAVAILABLE, result.stdout + result.stderr
     members = _all_layer_member_names()
     for forbidden in ("google/genai", "github", "firebase"):
         offenders = [name for name in members if f"/{forbidden}" in f"/{name}".casefold()]
         assert not offenders, f"{forbidden} material in the image: {offenders[:5]}"
+
+
+def test_the_container_takes_its_token_from_the_launcher_socket(
+    built_image: str, private_pem: str
+) -> None:
+    """The real artefact, requesting a token over a socket mounted where the
+    launcher's is, then trying to deliver it.
+
+    The container runs with no network, so the metadata server that would give
+    it a storage credential is unreachable: the only acceptable result is a
+    token *obtained* and *not delivered* — exit 17, `ACCESS_TOKEN_UNAVAILABLE`.
+    The workload verifies nothing either way; that is the relying party's job.
+    This shows the request leaves the real image in the documented shape, the
+    response is accepted as a token, and the token does not reach the output.
+    """
+
+    directory = Path(tempfile.mkdtemp(prefix="mcpforge-cs-"))
+    directory.chmod(0o755)
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": "https://confidentialcomputing.googleapis.com",
+            "aud": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
+            "sub": "container-check",
+            "iat": now,
+            "exp": now + 600,
+        },
+        private_pem,
+        algorithm="RS256",
+    )
+    socket_path = directory / "teeserver.sock"
+    server = launcher_stub._LauncherServer(str(socket_path), launcher_stub.serve_token(token))
+    socket_path.chmod(0o666)
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
+    try:
+        result = _docker_run(
+            built_image,
+            dict(GOOD_CONFIG),
+            extra_args=("-v", f"{directory}:/run/container_launcher"),
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        shutil.rmtree(directory, ignore_errors=True)
+
+    assert result.returncode == EXIT_DELIVERY_FAILED, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["reason"] == "DELIVERY_FAILED"
+    attestation = payload["attestation"]
+    assert attestation["token_obtained"] is True
+    assert attestation["delivery_failure"] == "ACCESS_TOKEN_UNAVAILABLE"
+    assert attestation["delivered_to"] is None
+    assert "trust_level" not in attestation, "the workload verifies nothing and claims nothing"
+    assert attestation["token_sha256_prefix"] == hashlib.sha256(token.encode()).hexdigest()[:16]
+
+    assert len(server.received) == 1
+    request = server.received[0]
+    assert (request.method, request.path) == ("POST", "/v1/token")
+    assert json.loads(request.body) == {
+        "audience": GOOD_CONFIG["MCPFORGE_ATTESTATION_AUDIENCE"],
+        "token_type": "OIDC",
+    }
+    assert launcher_stub.leaked_fragments(token, result.stdout + result.stderr) == []
+
+
+# --- F8-02: the launch contract, against the built image ---------------------
+
+
+def test_every_required_name_is_supplied_by_exactly_one_source(
+    image_config: dict[str, Any], tmp_path: Path
+) -> None:
+    """Every name the entrypoint requires reaches it from exactly one place.
+
+    Derived from code at every end rather than from a list here: the required
+    names from `entrypoint.py`'s own `REQUIRED_ENVIRONMENT`; the image's
+    environment and its `allow_env_override` label from the **built** image's
+    config; the operator's values from the `tee-env-*` entries of the command
+    `launch.sh` prints, as bash parses it. A required name supplied by neither
+    source, a name supplied by both, or a `tee-env-*` name the launch policy
+    does not allow (which the launcher refuses outright) each fail.
+
+    This is the check the failed VM run needed: its workload refused because
+    required configuration was missing.
+    """
+
+    required = tuple(load_entrypoint().REQUIRED_ENVIRONMENT)
+    assert required, "REQUIRED_ENVIRONMENT is empty — reading the wrong file"
+
+    image_env = {entry.partition("=")[0] for entry in image_config["config"]["Env"]}
+    plan = run_launch_plan(tmp_path)
+    assert plan.exit_code == 0, plan.stdout + plan.stderr
+    tee_env = {key.removeprefix("tee-env-") for key in plan.metadata if key.startswith("tee-env-")}
+    allowed = set(
+        image_config["config"]["Labels"]["tee.launch_policy.allow_env_override"].split(",")
+    )
+
+    unsupplied = [name for name in required if name not in image_env | tee_env]
+    assert unsupplied == [], (
+        f"required but supplied by neither the image nor launch.sh: {unsupplied}"
+    )
+    assert image_env & tee_env == set(), f"supplied by both: {sorted(image_env & tee_env)}"
+    assert tee_env <= allowed, f"not allowed by the launch policy: {sorted(tee_env - allowed)}"

@@ -8,10 +8,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mcpforge.api import agent, approvals, chat, generation, health, me, projects, repos, trust
+from mcpforge.api import (
+    agent,
+    approvals,
+    attestation,
+    chat,
+    generation,
+    health,
+    me,
+    projects,
+    repos,
+    trust,
+)
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
-from mcpforge.config import Settings, get_settings
+from mcpforge.config import SecureExecutorKind, Settings, get_settings
 from mcpforge.execution.provider import SecureExecutionProvider
 from mcpforge.gemini.google_provider import GoogleGenAIProvider
 from mcpforge.gemini.provider import GeminiProvider
@@ -81,8 +92,14 @@ def create_app(
     # In-memory is the Phase 2 store. Firestore lands behind the same port later.
     app.state.store = store or InMemoryStore()
     app.state.gemini = gemini or GoogleGenAIProvider(settings)
-    # No default: an execution provider is attached only by something that
-    # actually runs jobs. See `api/trust.py` for what the panel says meanwhile.
+    # No default provider in development: the trust panel reports that absence
+    # (`api/trust.py`). With SECURE_EXECUTOR=confidential_space the API is the
+    # attestation relying party (F8-02); its executor refuses every job and
+    # reports an attested level only after it has verified a delivered token.
+    if executor is None and settings.secure_executor is SecureExecutorKind.CONFIDENTIAL_SPACE:
+        from mcpforge.relying_party import build_executor
+
+        executor = build_executor(settings)
     app.state.executor = executor
     app.state.github = github or GitHubAppClient(
         app_id=settings.github_app_id,
@@ -106,6 +123,7 @@ def create_app(
     app.include_router(generation.router)
     app.include_router(agent.router)
     app.include_router(trust.router)
+    app.include_router(attestation.router)
     return app
 
 

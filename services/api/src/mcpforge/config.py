@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -90,7 +91,37 @@ class Settings(BaseSettings):
     job_timeout_seconds: int = 600
     job_memory_mb: int = 2048
 
+    # Confidential Space relying party (F8-02). The image digest is the API's
+    # own pin — the value a delivered token must name — and is never taken from
+    # the operator or the workload. No defaults: absent means unconfigured.
+    confidential_space_image_digest: str | None = None
+    confidential_space_workload_service_account: str | None = None
+    confidential_space_attestation_bucket: str | None = None
+    confidential_space_run_dir: str | None = None
+
     index_max_file_bytes: int = 262_144
+
+    @field_validator(
+        "confidential_space_image_digest",
+        "confidential_space_workload_service_account",
+        "confidential_space_attestation_bucket",
+        "confidential_space_run_dir",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_unset(cls, v: object) -> object:
+        # `.env.example` declares these names with no values; a copied blank
+        # must read as "unconfigured", not as an empty path or digest.
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @property
+    def confidential_space_run_directory(self) -> Path:
+        if self.confidential_space_run_dir:
+            return Path(self.confidential_space_run_dir)
+        return Path.home() / ".local" / "state" / "mcpforge" / "attestation-runs"
+
     index_max_files: int = 20_000
 
     @field_validator("api_cors_origins")
@@ -138,6 +169,13 @@ class Settings(BaseSettings):
         missing: list[str] = []
         if not self.firebase_project_id:
             missing.append("FIREBASE_PROJECT_ID")
+        if self.secure_executor is SecureExecutorKind.CONFIDENTIAL_SPACE:
+            if not self.confidential_space_image_digest:
+                missing.append("CONFIDENTIAL_SPACE_IMAGE_DIGEST")
+            if not self.confidential_space_workload_service_account:
+                missing.append("CONFIDENTIAL_SPACE_WORKLOAD_SERVICE_ACCOUNT")
+            if not self.confidential_space_attestation_bucket:
+                missing.append("CONFIDENTIAL_SPACE_ATTESTATION_BUCKET")
         if not self.gemini_configured:
             missing.append(
                 "GOOGLE_CLOUD_PROJECT (GEMINI_BACKEND=vertex)"

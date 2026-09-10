@@ -32,6 +32,7 @@ constrain it, so an unparsable condition is a **failure**, never a pass.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -72,6 +73,12 @@ _POLICY_CONDITION_END = "<!-- END ATTRIBUTE CONDITION -->"
 #: workload service account is granted.
 _POLICY_ROLES_BEGIN = "<!-- BEGIN PROJECT ROLES -->"
 _POLICY_ROLES_END = "<!-- END PROJECT ROLES -->"
+
+#: The fenced block that enumerates the roles granted on the attestation bucket
+#: (F8-02). Bucket-scoped, and kept apart from the project roles so a
+#: bucket role can never be satisfied by a project-wide grant or vice versa.
+_POLICY_BUCKET_ROLES_BEGIN = "<!-- BEGIN BUCKET ROLES -->"
+_POLICY_BUCKET_ROLES_END = "<!-- END BUCKET ROLES -->"
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -181,10 +188,50 @@ def documented_conditions(policy_markdown: str) -> tuple[str, ...]:
 def documented_roles(policy_markdown: str) -> tuple[str, ...]:
     """Every project role ``policy.md`` enumerates for the workload account."""
 
-    block = _delimited(policy_markdown, _POLICY_ROLES_BEGIN, _POLICY_ROLES_END)
+    return _role_block(policy_markdown, _POLICY_ROLES_BEGIN, _POLICY_ROLES_END, "project")
+
+
+def documented_bucket_roles(policy_markdown: str) -> tuple[str, ...]:
+    """Every role ``policy.md`` grants the workload account on the attestation bucket."""
+
+    return _role_block(
+        policy_markdown, _POLICY_BUCKET_ROLES_BEGIN, _POLICY_BUCKET_ROLES_END, "bucket"
+    )
+
+
+def bucket_drift(
+    document: dict[str, Any], *, lifecycle: dict[str, Any], location: str
+) -> list[str]:
+    """How a `gcloud storage buckets describe --format=json` document differs.
+
+    Field names are the ones gcloud's own storage resource formatter emits
+    (`googlecloudsdk/command_lib/storage/resources/full_resource_formatter.py`):
+    `location`, `uniform_bucket_level_access`, `public_access_prevention`,
+    `lifecycle_config`. Read from the SDK source, not observed on a live bucket.
+    An empty list means the bucket is as declared.
+    """
+
+    drift: list[str] = []
+    live_location = str(document.get("location", ""))
+    if live_location.upper() != location.upper():
+        drift.append(f"location is {live_location!r}, declared {location!r}")
+    if document.get("uniform_bucket_level_access") is not True:
+        drift.append("uniform_bucket_level_access is not enabled")
+    if document.get("public_access_prevention") != "enforced":
+        drift.append(
+            f"public_access_prevention is {document.get('public_access_prevention')!r}, "
+            "not 'enforced'"
+        )
+    if document.get("lifecycle_config") != lifecycle:
+        drift.append(f"lifecycle_config is {document.get('lifecycle_config')!r}")
+    return drift
+
+
+def _role_block(policy_markdown: str, begin: str, end: str, kind: str) -> tuple[str, ...]:
+    block = _delimited(policy_markdown, begin, end)
     roles = tuple(normalise(line) for line in block.splitlines() if normalise(line))
     if not roles:
-        raise SetupScanError("policy.md enumerates no project roles")
+        raise SetupScanError(f"policy.md enumerates no {kind} roles")
     for role in roles:
         if not role.startswith("roles/"):
             raise SetupScanError(f"policy.md role is not a role id: {role!r}")
@@ -275,7 +322,9 @@ def _lookup(path: str, claims: dict[str, Any]) -> Any:
     return current
 
 
-def _consistency(policy_path: str, condition: str, roles: list[str]) -> int:
+def _consistency(
+    policy_path: str, condition: str, roles: list[str], bucket_roles: list[str]
+) -> int:
     """Compare the live values ``setup.sh`` holds against ``policy.md``."""
 
     policy_markdown = _read(policy_path)
@@ -298,6 +347,15 @@ def _consistency(policy_path: str, condition: str, roles: list[str]) -> int:
     for role in policy_roles:
         if role not in script_roles:
             problems.append(f"role enumerated in policy.md but not granted by setup.sh: {role}")
+
+    script_bucket_roles = tuple(normalise(role) for role in bucket_roles if normalise(role))
+    policy_bucket_roles = documented_bucket_roles(policy_markdown)
+    for role in script_bucket_roles:
+        if role not in policy_bucket_roles:
+            problems.append(f"bucket role granted by setup.sh but not in policy.md: {role}")
+    for role in policy_bucket_roles:
+        if role not in script_bucket_roles:
+            problems.append(f"bucket role in policy.md but not granted by setup.sh: {role}")
 
     if problems:
         print("setup_scan: setup.sh and policy.md disagree:", file=sys.stderr)
@@ -326,15 +384,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--consistency", metavar="POLICY_MD")
     parser.add_argument("--condition")
     parser.add_argument("--role", action="append", default=[])
+    parser.add_argument("--bucket-role", action="append", default=[])
     parser.add_argument("--normalise", metavar="TEXT")
+    parser.add_argument("--bucket-drift", metavar="LIFECYCLE_JSON")
+    parser.add_argument("--bucket-location")
     arguments = parser.parse_args(argv)
     try:
         if arguments.normalise is not None:
             print(normalise(arguments.normalise))
             return 0
+        if arguments.bucket_drift is not None:
+            if not arguments.bucket_location:
+                parser.error("--bucket-drift needs --bucket-location")
+            lifecycle = json.loads(_read(arguments.bucket_drift))
+            document = json.loads(sys.stdin.read())
+            if not isinstance(document, dict):
+                raise SetupScanError("the bucket description is not a JSON object")
+            for line in bucket_drift(
+                document, lifecycle=lifecycle, location=arguments.bucket_location
+            ):
+                print(line)
+            return 0
         if arguments.consistency is None or arguments.condition is None:
             parser.error("--consistency and --condition are required together")
-        return _consistency(arguments.consistency, arguments.condition, arguments.role)
+        return _consistency(
+            arguments.consistency, arguments.condition, arguments.role, arguments.bucket_role
+        )
     except SetupScanError as error:
         print(f"setup_scan: {error}", file=sys.stderr)
         return 2

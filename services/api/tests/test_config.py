@@ -48,8 +48,31 @@ def test_production_with_everything_set_passes() -> None:
         firebase_project_id="p",
         gemini_api_key="k",
         secure_executor=SecureExecutorKind.CONFIDENTIAL_SPACE,
+        confidential_space_image_digest="sha256:" + "ab" * 32,
+        confidential_space_workload_service_account="mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com",
+        confidential_space_attestation_bucket="mcpforge-aa5c2-attestation",
     )
     s.require_production_invariants()
+
+
+def test_the_relying_party_has_no_default_pin() -> None:
+    """F8-02: a production relying party with no digest, account or bucket
+    refuses to start rather than verifying against nothing."""
+    s = Settings(
+        mcpforge_env=Environment.PRODUCTION,
+        firebase_project_id="p",
+        gemini_api_key="k",
+        secure_executor=SecureExecutorKind.CONFIDENTIAL_SPACE,
+        confidential_space_image_digest="  ",
+    )
+    with pytest.raises(ConfigError) as caught:
+        s.require_production_invariants()
+    for name in (
+        "CONFIDENTIAL_SPACE_IMAGE_DIGEST",
+        "CONFIDENTIAL_SPACE_WORKLOAD_SERVICE_ACCOUNT",
+        "CONFIDENTIAL_SPACE_ATTESTATION_BUCKET",
+    ):
+        assert name in str(caught.value)
 
 
 def test_wildcard_cors_origin_rejected() -> None:

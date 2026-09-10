@@ -13,11 +13,13 @@ and one comparison, in `setup_scan.py`, shared by the script and by
 review rounds to two implementations of one rule drifting apart; that is why
 this is arranged the way it is.
 
-**Status: nothing here has been applied.** No workload identity pool, provider
-or service account exists in `mcpforge-aa5c2` as of this writing. The live
-verification record is in `README.md`, and it is empty. Everything below is a
-declaration of intent that the script will make true when an operator runs
-`--apply`, not a description of infrastructure that exists.
+**Status (observed read-only, 2026-09-11).** The project owner ran `--apply` at
+the earlier digest `sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db`,
+the only image in the registry: the `mcpforge-attestation` provider is live and
+its condition pins that digest. What this document declares below — the digest
+`sha256:cebf7ea1…`, the attestation bucket and its bucket-scoped role — is
+**not applied**: the new digest is not pushed, the repin has not been run, and
+the bucket does not exist. The live verification record is in `README.md`.
 
 ---
 
@@ -31,7 +33,7 @@ declaration of intent that the script will make true when an operator runs
 | Issuer | `https://confidentialcomputing.googleapis.com` |
 | Workload service account | `mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com` |
 | Workload image | `us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload` |
-| Pinned digest | `sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db` |
+| Pinned digest | `sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765` |
 
 The issuer is the same string as `CONFIDENTIAL_SPACE_ISSUER` in
 `services/api/src/mcpforge/execution/attestation.py`, and
@@ -54,7 +56,7 @@ grows one.
 <!-- BEGIN ATTRIBUTE CONDITION -->
 ```cel
 assertion.swname == 'CONFIDENTIAL_SPACE'
-assertion.submods.container.image_digest == 'sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db'
+assertion.submods.container.image_digest == 'sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765'
 assertion.hwmodel in ['GCP_AMD_SEV', 'GCP_AMD_SEV_ES', 'GCP_AMD_SEV_SNP', 'GCP_INTEL_TDX']
 assertion.dbgstat == 'disabled-since-boot'
 'STABLE' in assertion.submods.confidential_space.support_attributes
@@ -71,7 +73,7 @@ the meanings assumed below — `image_digest`, in particular, is a Confidential
 Space claim about the container it launched. Equality, not membership: there is
 exactly one acceptable stack. Mirrors `AttestationPolicy.required_software_name`.
 
-### `assertion.submods.container.image_digest == 'sha256:9dff…3b7d3'`
+### `assertion.submods.container.image_digest == 'sha256:cebf…89765'`
 
 **Claim constrained: the digest of the container image Confidential Space
 actually launched.** This is the clause the whole ticket exists for. It is exact
@@ -155,9 +157,11 @@ they are now both right.
   own resource name as `aud`, so no `--allowed-audiences` is configured and the
   default audience applies. The per-run nonce audience that
   `AttestationPolicy.audience` pins is a *different* token — the one the
-  workload requests for MCPForge itself — and binding it is `F8-02`'s job, not
-  this one's. Saying otherwise here would claim replay protection this ticket
-  does not deliver.
+  workload requests for MCPForge itself. In `F8-02` the MCPForge API issues
+  that audience, receives the token through the attestation bucket and
+  verifies it against its own record, once per run — that is where replay is
+  refused. It is not constrained here, and saying otherwise would claim replay
+  protection this federation does not deliver.
 - **`iat` / `exp`.** Google validates token lifetime during the exchange, and
   `verify_attestation_token` validates it again with a bounded skew.
 
@@ -198,6 +202,31 @@ roles/artifactregistry.reader
 | `roles/confidentialcomputing.workloadUser` | The Confidential Space VM presents this identity when it asks the Confidential Computing API for an attestation token. Without it the workload obtains no token, and `verify_attestation_token` has nothing to verify — so there is no `HARDWARE_ATTESTED` path at all. |
 | `roles/artifactregistry.reader` | The VM pulls the workload image from `us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor`. Read on Artifact Registry, not write: nothing running inside the TEE may publish an image, least of all the image it is itself attested as. |
 
+### Bucket roles — the attestation bucket only (F8-02)
+
+The workload writes its raw attestation token to
+`gs://mcpforge-aa5c2-attestation/attestation/<run id>.jwt`, and the MCPForge API
+reads it and verifies it. This role is granted **on that one bucket**, never on
+the project, and `setup.sh --verify` reports any other role the account holds
+there.
+
+<!-- BEGIN BUCKET ROLES -->
+```
+roles/storage.objectCreator
+```
+<!-- END BUCKET ROLES -->
+
+| Role | Why, and why nothing wider |
+|---|---|
+| `roles/storage.objectCreator` on `gs://mcpforge-aa5c2-attestation` | The narrowest predefined role that can create an object: `storage.objects.create` and nothing else of substance. It cannot read, list, overwrite or delete objects, so a compromised workload can deliver a token for its run and cannot read, replace or erase anyone else's. Overwrite is refused twice — the role lacks delete, and the workload uploads with `ifGenerationMatch=0`. |
+
+The bucket itself: `us-central1`, uniform bucket-level access, public access
+prevention enforced, and a lifecycle rule deleting every object one day after
+creation (`attestation-lifecycle.json`). The token is signed by Google, so the
+bucket is transport, not a trust anchor: whoever could write to it could at
+most deliver a token that fails verification. The API reads with the owner's
+Application Default Credentials; no service-account key exists for either side.
+
 `roles/logging.logWriter` is **not** granted, and the reason is a decision made
 one file away. The image sets `tee.launch_policy.log_redirect=never`
 (`infra/confidential-space/Dockerfile`), so Confidential Space does not write the
@@ -211,7 +240,10 @@ different digest and fails the attribute condition below, so the role would have
 to be reconsidered together with the condition rather than added on its own.
 
 **Other roles deliberately not granted**, each of which would be easy to add and
-wrong: any `roles/storage.*` (the workload holds no bucket); any
+wrong: any `roles/storage.*` at the project level, and on the attestation bucket
+anything beyond `objectCreator` — not `objectViewer` (the workload has no reason
+to read a token back), not `objectUser` or `objectAdmin` (they can delete and
+overwrite), not `legacyBucketWriter`; any
 `roles/artifactregistry.writer` (see above); `roles/iam.serviceAccountTokenCreator`
 (the workload impersonates nobody; federation flows the other way);
 `roles/editor` or any other basic role; and anything on Firestore — the workload
@@ -232,7 +264,7 @@ changes.
 ```
 member = principalSet://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/
          workloadIdentityPools/mcpforge-confidential-space/
-         attribute.image_digest/sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db
+         attribute.image_digest/sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765
 role   = roles/iam.workloadIdentityUser
 ```
 
@@ -254,9 +286,10 @@ principal sets require the number.
 
 ## 6. What this document does not claim
 
-- **Nothing here has been applied to real infrastructure.** The script has never
-  been run with `--apply`. See `README.md` for the (empty) live verification
-  record.
+- **This document's current declaration is not what is live.** The owner
+  applied the script at `sha256:76a88540…`; the repin to the digest above and
+  the attestation bucket are planned, not applied. See `README.md` for the live
+  verification record.
 - **The tests do not evaluate CEL the way Google does.** `setup_scan.py` holds a
   small evaluator over the subset this condition uses — `&&`, `==`, `in`,
   dotted paths, string and list literals — and refuses anything outside it. It

@@ -6,7 +6,7 @@
 
 ## Overall completion
 
-**90%** — Phase 8 complete except `F8-02`, which is `BLOCKED` on B-04 and is never marked done on a simulation. `F8-01`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2, 2, 3 and 3.
+**90%** — Phase 8 complete except `F8-02`, which is `BLOCKED` on B-04 and is never marked done on a simulation. `F8-01`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2, 2, 3 and 3. **`F8-02`'s code side passed review on 2026-09-11**; what remains is an owner-run Confidential Space VM, and the percentage does not move until that run's token is verified by the API.
 
 ## Current phase
 
@@ -27,7 +27,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-None. Every buildable Phase 8 ticket is done. `F8-02` stays `BLOCKED`: clearing it needs three owner actions — `build.sh --push`, `setup.sh --apply`, and booting a Confidential VM — after which `F8-02` fetches and verifies a real attestation token. It is never marked done on a simulation. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
+None. `F8-02`'s code side — launcher token retrieval, relying-party verification in the API, bucket transport — passed review. `F8-02` stays `BLOCKED` until a real Confidential Space run produces a token **the API service** verifies against its own pinned digest and the nonce it issued. Three owner actions remain, in order: `bash infra/confidential-space/build.sh --push`, then `bash infra/confidential-space/setup.sh --apply`, then issue a run with `python -m mcpforge.relying_party begin` and launch it with `launch.sh --run-id <id> --apply` on the production `confidential-space` family. It is never marked done on a simulation.
 
 ---
 
@@ -105,7 +105,7 @@ Phases 8–9, tickets `F8-01` through `F9-05`, plus `F6-05` (GitHub webhook, nee
 | B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally. The quota project was originally `launchforge-tee`; MCPForge is now pinned to the single canonical project `mcpforge-aa5c2` (see the Google Cloud identifiers section below) | Closed |
 | B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
 | B-03 | ~~No GitHub App~~ — **resolved** | App 4797679 registered and installed on `tony19053000`, scoped to selected repositories. Verified live: contents=write, pull_requests=write, metadata=read, and nothing else | Closed |
-| B-04 | No GCP Confidential Space infrastructure | Ticket `F8-02` cannot be completed and is marked `BLOCKED`. **It will not be simulated or marked done.** Development isolation continues to work and is labelled honestly. The project owner has since created GCP project `mcpforge-aa5c2` with an Artifact Registry repository; the registry is still empty and no workload identity pool or Confidential VM exists, so the blocker stands. Clearing it is `F8-02a` (workload image) then `F8-02b` (workload identity), then `F8-02` | Open — narrowing; Phase 8 |
+| B-04 | No verified Confidential Space run | `F8-02` is `BLOCKED` and **will not be simulated or marked done.** Live state (read-only, 2026-09-11): the registry holds `sha256:76a88540…`, pushed 2026-09-10; the `mcpforge-attestation` provider is live and pinned to it. A paid VM run on 2026-09-10 failed — the launch passed no `tee-env-*` values, and no code requested a token — and the VM was deleted. `F8-02`'s code side has since passed review: the new image `sha256:cebf7ea1…` is built locally, not pushed; the attestation bucket and its write grant are planned in `setup.sh`, not applied. Clearing B-04 needs three owner actions: `build.sh --push`, `setup.sh --apply`, then a relying-party-issued run launched on the production family | Open — code complete; awaiting an owner-run VM |
 
 None of these block Phase 1. Work continues on everything that can be built and tested without them.
 
@@ -144,7 +144,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1442 passing** — 262 web (Vitest/RTL), 1180 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1560 passing** — 262 web (Vitest/RTL), 1298 API (pytest), 4 skipped (2 web, 2 API — the second API skip is the opt-in live check against Google's JWKS). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -1286,3 +1286,103 @@ and verify it. It is never marked done on a simulation.
 `F9-01` (the approval-consuming stages that leave `F7-02` and `F7-03`
 `PARTIALLY BLOCKED`), `F9-03` (Playwright E2E, still absent) and `F6-05` (needs
 a public URL) are the known carry-forwards.
+
+---
+
+### 0018 — F8-02, code side: a token the service verifies, not one the image vouches for
+
+**Not a completion.** `F8-02` stays `BLOCKED`. This entry records that its code
+side passed review; the ticket completes only when a real Confidential Space run
+produces a token the API service verifies.
+
+**Why this work happened.** The owner launched a paid Confidential Space VM on
+2026-09-10 against the pushed image `sha256:76a88540…`. It failed and was
+deleted. Two blockers: (1) the workload refused to start for missing runtime
+configuration — the launch command it was given carried no `tee-env-*` values;
+(2) no code requested an attestation token at all.
+
+**What was built.**
+- **Token retrieval inside the workload** through the official launcher
+  interface: `POST http://localhost/v1/token` over
+  `/run/container_launcher/teeserver.sock`, body `{"audience", "token_type":
+  "OIDC"}`, raw JWT back. Standard library only, a 30 s watchdog over the whole
+  exchange, a 64 KiB body cap, and the response must be exactly one compact JWS.
+  Every failure is named and yields no token.
+- **The relying party is the API service**, `services/api/src/mcpforge/relying_party/`.
+  `python -m mcpforge.relying_party begin` issues a run id and a random 128-bit
+  audience — the nonce — and records the run pending. `launch.sh --run-id <id>`
+  obtains the audience only from that record and refuses an unknown, verified or
+  expired run; there is no audience argument.
+- **Transport is a private bucket.** The workload writes the raw token,
+  create-only, to `gs://mcpforge-aa5c2-attestation/attestation/<run_id>.jwt`. The
+  token is Google-signed, so the bucket is transport and need not be trusted. The
+  workload service account gets `roles/storage.objectCreator` on that one bucket
+  only; it cannot read, delete or overwrite.
+- **Verification** in `POST /api/attestation-runs/{id}/verify` and `relying_party
+  verify`, through `verify_attestation_token`, against the audience the API
+  issued, the digest in **the API's own configuration**
+  (`CONFIDENTIAL_SPACE_IMAGE_DIGEST`), the workload service account, Google's JWKS
+  from the discovery document, and expiry. **Replay is refused twice**: a
+  consumed-record check and an atomic pending-to-consumed rename.
+
+**Decisions made.**
+1. **In-TEE self-verification was rejected.** The first implementation verified
+   the token inside the workload and never let it out. The reviewer returned FAIL:
+   an image that checks its own token proves nothing to anyone outside, because a
+   malicious image would simply report success. The owner decided the
+   relying-party channel belonged in this work so one paid run proves the whole
+   path.
+2. **`MCPFORGE_EXPECTED_IMAGE_DIGEST` was added and then removed.** Once the
+   relying party pins the digest from its own configuration, an operator-supplied
+   digest adds nothing a relying party can use. `allow_env_override` is back to
+   the two per-run values.
+3. **The path-jail root is an in-code constant, `/workspace`**, not an image
+   `ENV`. It cannot be set by an operator, and the entrypoint refuses if
+   `MCPFORGE_WORKSPACE_ROOT` is set at all. The failed run reportedly listed it as
+   missing; the pushed image did carry it, and Google's launcher source passes
+   image `ENV` through, so that report remains **unexplained** — the constant
+   removes the dependency rather than explaining it.
+4. **`launch.sh` launches the production `confidential-space` family.** It was
+   written against the debug family, which reports `dbgstat=enabled`; the relying
+   party requires `disabled-since-boot`, so a debug run could never clear B-04.
+   The review caught this before any money was spent on it. A production VM still
+   writes the launcher's exit status to the serial console, and it stops when the
+   workload ends.
+5. **No metadata-server attestation path.** The metadata server supplies only an
+   OAuth access token for the bucket upload, confined to
+   `execution/token_delivery.py` and visibly separate from token retrieval.
+
+**Runtime variables for the next VM**: `tee-env-MCPFORGE_RUN_ID` and
+`tee-env-MCPFORGE_ATTESTATION_AUDIENCE`, both issued by the relying party and
+written into the command by `launch.sh`. Nothing else.
+
+**Digest.** `sha256:76a88540…` is in the registry and pinned by the live provider
+from the earlier `setup.sh --apply`. The image this work produces is
+`sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765`,
+reproduced by the reviewer from a clean clone on a fresh builder, and pinned in
+every live site. It is **built locally, not pushed.**
+
+**Review gate outcome.** `PASS` on the second code review. Round 1 found the
+design sound for safety but not for purpose (self-verification), plus three
+documentation defects; round 2 confirmed genuine relying-party verification,
+least privilege, replay refusal, no weakening of `attestation.py`, both F8-01
+sweeps intact, and no GCP change. The debug-family finding was applied after the
+verdict as a one-line change outside the image, with the launch test proven to
+fail if it reverts.
+
+**What still needs a real VM to confirm.** The launcher accepting a digest-pinned
+`tee-image-reference` (read from launcher source, not observed); `tee-env-*`
+values reaching the workload; the exact bytes the launcher returns; the workload
+reaching `storage.googleapis.com` and Google's JWKS; and the claim names in a
+real token, against the policy.
+
+**Owner actions, in order.** `bash infra/confidential-space/build.sh --push`,
+then `bash infra/confidential-space/setup.sh --apply`, then issue a run with
+`python -m mcpforge.relying_party begin` and launch it with `launch.sh --run-id
+<id> --apply`. Delete the VM afterwards.
+
+**What NOT to change accidentally.** The relying party as the only route to
+`HARDWARE_ATTESTED`; the API-issued nonce with no audience argument on
+`launch.sh`; the digest taken from the API's configuration, never the token; the
+two replay guards; the bucket-scoped create-only grant; the production image
+family.
