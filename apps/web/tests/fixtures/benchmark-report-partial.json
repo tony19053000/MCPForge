@@ -1,0 +1,499 @@
+{
+  "benchmark_id": "bench-2",
+  "sandbox": {
+    "trust_level": "DEVELOPMENT_ISOLATION",
+    "allow_network": false,
+    "argv": [
+      "node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "mcpforge.benchmark.config.mts",
+      "src/webmcp/__benchmark__/scenario.test.mts"
+    ],
+    "cwd": "app",
+    "timeout_seconds": 300,
+    "env": [
+      [
+        "NEXT_TELEMETRY_DISABLED",
+        "1"
+      ],
+      [
+        "NO_COLOR",
+        "1"
+      ],
+      [
+        "NPM_CONFIG_UPDATE_NOTIFIER",
+        "false"
+      ]
+    ]
+  },
+  "runs": [
+    {
+      "run_id": "bench-2:before",
+      "side": "BEFORE",
+      "workspace_id": "ws-before",
+      "started_at": "2026-09-10T03:13:11Z",
+      "completed_at": "2026-09-10T03:13:11Z",
+      "sandbox": {
+        "trust_level": "DEVELOPMENT_ISOLATION",
+        "allow_network": false,
+        "argv": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "mcpforge.benchmark.config.mts",
+          "src/webmcp/__benchmark__/scenario.test.mts"
+        ],
+        "cwd": "app",
+        "timeout_seconds": 300,
+        "env": [
+          [
+            "NEXT_TELEMETRY_DISABLED",
+            "1"
+          ],
+          [
+            "NO_COLOR",
+            "1"
+          ],
+          [
+            "NPM_CONFIG_UPDATE_NOTIFIER",
+            "false"
+          ]
+        ]
+      },
+      "evidence": {
+        "check_id": "benchmark:before",
+        "argv": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "mcpforge.benchmark.config.mts",
+          "src/webmcp/__benchmark__/scenario.test.mts"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_seconds": 0.5,
+        "stdout_excerpt": "Tests  1 passed (1)",
+        "stderr_excerpt": "",
+        "output_truncated": false
+      },
+      "events": [],
+      "trace_complete": false,
+      "trace_note": "the scenario wrote no trace, so this run measured nothing.",
+      "integration": null
+    },
+    {
+      "run_id": "bench-2:after",
+      "side": "AFTER",
+      "workspace_id": "ws-after",
+      "started_at": "2026-09-10T03:13:11Z",
+      "completed_at": "2026-09-10T03:13:11Z",
+      "sandbox": {
+        "trust_level": "DEVELOPMENT_ISOLATION",
+        "allow_network": false,
+        "argv": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "mcpforge.benchmark.config.mts",
+          "src/webmcp/__benchmark__/scenario.test.mts"
+        ],
+        "cwd": "app",
+        "timeout_seconds": 300,
+        "env": [
+          [
+            "NEXT_TELEMETRY_DISABLED",
+            "1"
+          ],
+          [
+            "NO_COLOR",
+            "1"
+          ],
+          [
+            "NPM_CONFIG_UPDATE_NOTIFIER",
+            "false"
+          ]
+        ]
+      },
+      "evidence": {
+        "check_id": "benchmark:after",
+        "argv": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "mcpforge.benchmark.config.mts",
+          "src/webmcp/__benchmark__/scenario.test.mts"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_seconds": 0.511,
+        "stdout_excerpt": "Tests  1 passed (1)",
+        "stderr_excerpt": "",
+        "output_truncated": false
+      },
+      "events": [
+        {
+          "kind": "scenario_started",
+          "at_ms": 1000.0,
+          "task": null,
+          "detail": "",
+          "integration": "present"
+        },
+        {
+          "kind": "task_attempted",
+          "at_ms": 1001.0,
+          "task": "search_rooms",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "step",
+          "at_ms": 1002.0,
+          "task": "search_rooms",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "task_completed",
+          "at_ms": 1003.0,
+          "task": "search_rooms",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "task_attempted",
+          "at_ms": 1004.0,
+          "task": "check_availability",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "step",
+          "at_ms": 1005.0,
+          "task": "check_availability",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "task_completed",
+          "at_ms": 1006.0,
+          "task": "check_availability",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "task_attempted",
+          "at_ms": 1007.0,
+          "task": "cancel_reservation",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "step",
+          "at_ms": 1008.0,
+          "task": "cancel_reservation",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "approval_required",
+          "at_ms": 1009.0,
+          "task": "cancel_reservation",
+          "detail": "",
+          "integration": null
+        },
+        {
+          "kind": "scenario_finished",
+          "at_ms": 1010.0,
+          "task": null,
+          "detail": "",
+          "integration": null
+        }
+      ],
+      "trace_complete": true,
+      "trace_note": "",
+      "integration": "present"
+    }
+  ],
+  "rows": [
+    {
+      "metric": "INTERACTION_STEPS",
+      "label": "Interaction steps",
+      "unit": "COUNT",
+      "before": {
+        "state": "not_measured",
+        "metric": "INTERACTION_STEPS",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "INTERACTION_STEPS",
+        "side": "AFTER",
+        "value": 3.0,
+        "unit": "COUNT",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Count of 'step' events in the trace recorded by run bench-2:after.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    },
+    {
+      "metric": "TASKS_ATTEMPTED",
+      "label": "Tasks attempted",
+      "unit": "COUNT",
+      "before": {
+        "state": "not_measured",
+        "metric": "TASKS_ATTEMPTED",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "TASKS_ATTEMPTED",
+        "side": "AFTER",
+        "value": 3.0,
+        "unit": "COUNT",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Count of 'task_attempted' events in the trace recorded by run bench-2:after.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    },
+    {
+      "metric": "TASKS_COMPLETED",
+      "label": "Tasks completed",
+      "unit": "COUNT",
+      "before": {
+        "state": "not_measured",
+        "metric": "TASKS_COMPLETED",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "TASKS_COMPLETED",
+        "side": "AFTER",
+        "value": 2.0,
+        "unit": "COUNT",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Count of 'task_completed' events in the trace recorded by run bench-2:after.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    },
+    {
+      "metric": "ERRORS",
+      "label": "Errors",
+      "unit": "COUNT",
+      "before": {
+        "state": "not_measured",
+        "metric": "ERRORS",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "ERRORS",
+        "side": "AFTER",
+        "value": 0.0,
+        "unit": "COUNT",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Count of 'error' events in the trace recorded by run bench-2:after.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    },
+    {
+      "metric": "RETRIES",
+      "label": "Retries",
+      "unit": "COUNT",
+      "before": {
+        "state": "not_measured",
+        "metric": "RETRIES",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "RETRIES",
+        "side": "AFTER",
+        "value": 0.0,
+        "unit": "COUNT",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Count of 'retry' events in the trace recorded by run bench-2:after.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    },
+    {
+      "metric": "APPROVAL_POINTS",
+      "label": "Approval points",
+      "unit": "COUNT",
+      "before": {
+        "state": "not_measured",
+        "metric": "APPROVAL_POINTS",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "APPROVAL_POINTS",
+        "side": "AFTER",
+        "value": 1.0,
+        "unit": "COUNT",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Count of 'approval_required' events in the trace recorded by run bench-2:after.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    },
+    {
+      "metric": "ELAPSED_SECONDS",
+      "label": "Elapsed time",
+      "unit": "SECONDS",
+      "before": {
+        "state": "not_measured",
+        "metric": "ELAPSED_SECONDS",
+        "side": "BEFORE",
+        "reason": "the scenario wrote no trace, so this run measured nothing."
+      },
+      "after": {
+        "state": "measured",
+        "metric": "ELAPSED_SECONDS",
+        "side": "AFTER",
+        "value": 0.01,
+        "unit": "SECONDS",
+        "run_id": "bench-2:after",
+        "recorded_at": "2026-09-10T03:13:11Z",
+        "derivation": "Span between the scenario's first and last recorded event, from the process clock inside the sandbox.",
+        "evidence": {
+          "check_id": "benchmark:after",
+          "argv": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "mcpforge.benchmark.config.mts",
+            "src/webmcp/__benchmark__/scenario.test.mts"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_seconds": 0.511,
+          "stdout_excerpt": "Tests  1 passed (1)",
+          "stderr_excerpt": "",
+          "output_truncated": false
+        }
+      },
+      "delta": null
+    }
+  ],
+  "scenario_bound": "Both runs execute the same scripted scenario: attempt every approved tool as a task through the browser model-context API, retrying a failed attempt once. This measures agent interaction through WebMCP only. It does not measure an agent driving the page's DOM, which MCPForge cannot execute without a browser."
+}

@@ -560,7 +560,7 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Acceptance criteria.** Every displayed number traces to a recorded measurement with a timestamp and a run id; no figure is estimated, extrapolated or illustrative; a metric that was not measured is absent rather than defaulted.
 **Tests.** Test that every rendered metric has a backing measurement record; test that a missing measurement renders as absent, not as zero.
 **Security.** The "before" run must be sandboxed identically to the "after" run so the comparison is honest.
-**Status.** `PENDING`
+**Status.** `DONE` — `PASS` on the third review round.
 
 ---
 

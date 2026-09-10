@@ -64,3 +64,51 @@ def code_lines(path: pathlib.Path) -> list[tuple[int, str]]:
         if code:
             out.append((lineno, code))
     return out
+
+
+def enclosing_function(tree: ast.Module, lineno: int) -> str:
+    """The innermost function containing `lineno`, or `<module>`."""
+    best = "<module>"
+    best_span: int | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        end = node.end_lineno or node.lineno
+        if node.lineno <= lineno <= end:
+            span = end - node.lineno
+            if best_span is None or span < best_span:
+                best, best_span = node.name, span
+    return best
+
+
+def call_sites(name: str) -> list[tuple[str, str, int]]:
+    """Every call of `name(...)` in backend source, as (file, function, line).
+
+    Both ordinary spellings are matched — the bare `Name(...)` and the
+    attribute-qualified `module.Name(...)` — because an earlier version matched
+    only the first and let `scoring.ExecutedCheck(...)` through, which is not
+    indirection, just the other way to write the call.
+
+    **Stated bound**, shared by every rule built on this: it matches names in
+    the AST. An aliased import, a `getattr`, or a value constructed elsewhere
+    and passed in are not matched, and no name-based check can match them.
+
+    Lives here rather than in one test module because F8-04 and F8-05 both
+    enforce a single-producer rule with it, and two copies of a matching rule is
+    how one of them silently stops matching.
+    """
+    sites: list[tuple[str, str, int]] = []
+    for path in python_files():
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            matched = (isinstance(func, ast.Name) and func.id == name) or (
+                isinstance(func, ast.Attribute) and func.attr == name
+            )
+            if matched:
+                sites.append(
+                    (str(path.relative_to(SRC)), enclosing_function(tree, node.lineno), node.lineno)
+                )
+    return sites

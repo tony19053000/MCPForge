@@ -82,7 +82,7 @@ from mcpforge.orchestration.scoring import (
     ScoreTableError,
     score_components,
 )
-from tests.structure import SRC, imported_modules, python_files
+from tests.structure import SRC, call_sites, imported_modules, python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ARCHITECTURE = REPO_ROOT / "02_ARCHITECTURE.md"
@@ -449,43 +449,6 @@ def test_evidence_excerpts_are_bounded() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _enclosing_function(tree: ast.Module, lineno: int) -> str:
-    best = "<module>"
-    best_span: int | None = None
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        end = node.end_lineno or node.lineno
-        if node.lineno <= lineno <= end:
-            span = end - node.lineno
-            if best_span is None or span < best_span:
-                best, best_span = node.name, span
-    return best
-
-
-def _call_sites(name: str) -> list[tuple[str, str, int]]:
-    """Every call of `name(...)` in backend source, as (file, function, line)."""
-    sites: list[tuple[str, str, int]] = []
-    for path in python_files():
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            matched = (isinstance(func, ast.Name) and func.id == name) or (
-                isinstance(func, ast.Attribute) and func.attr == name
-            )
-            if matched:
-                sites.append(
-                    (
-                        str(path.relative_to(SRC)),
-                        _enclosing_function(tree, node.lineno),
-                        node.lineno,
-                    )
-                )
-    return sites
-
-
 def test_component_scores_are_produced_in_exactly_one_function() -> None:
     """Points exist only where the arithmetic is, in the same shape as F8-01.
 
@@ -500,7 +463,7 @@ def test_component_scores_are_produced_in_exactly_one_function() -> None:
     """
     assert len(python_files()) > 20, "the sweep scanned almost nothing; it would pass vacuously"
 
-    sites = _call_sites("ComponentScore")
+    sites = call_sites("ComponentScore")
     assert sites, "found no producer at all — the sweep is not matching what it claims to"
     assert {(path, function) for path, function, _ in sites} == {
         ("mcpforge/orchestration/scoring.py", "score_components")
@@ -607,7 +570,7 @@ def test_no_module_assembles_evidence_from_a_mapping() -> None:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Call):
                 continue
-            # Both spellings, matching `_call_sites` above. Matching only the
+            # Both spellings, matching `tests.structure.call_sites`. Matching only the
             # bare name missed `scoring.ExecutedCheck(evidence={...})` after a
             # module-level import — not deliberate indirection, just the other
             # ordinary way to write the call, and the docstring claimed to
@@ -655,7 +618,7 @@ def test_check_evidence_is_constructed_in_exactly_one_place() -> None:
     the report traceable to a command the executor actually ran.
     """
     assert len(python_files()) > 20, "the sweep scanned almost nothing"
-    sites = _call_sites("CheckEvidence")
+    sites = call_sites("CheckEvidence")
     assert sites, "found no construction at all — the sweep is not matching"
     assert {(path, function) for path, function, _ in sites} == {
         ("mcpforge/orchestration/scoring.py", "from_result")

@@ -6,11 +6,20 @@
 
 ## Overall completion
 
-**89%** — Phase 8 in progress. `F8-01`, `F8-02a`, `F8-02b`, `F8-03` and `F8-04` complete, verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2, 2 and 3.
+**90%** — Phase 8 complete except `F8-02`, which is `BLOCKED` on B-04 and is never marked done on a simulation. `F8-01`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2, 2, 3 and 3.
 
 ## Current phase
 
-**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — in progress. `F8-01` is `DONE`. `F8-02` is `BLOCKED` on blocker B-04 (no GCP Confidential Space infrastructure) and will not be simulated. `F8-03`, `F8-04` and `F8-05` are `PENDING`.
+**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — **complete except `F8-02`**. `F8-01`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` are `DONE`. `F8-02` is `BLOCKED` on blocker B-04 and will not be simulated.
+
+Phase 8 took **21 review rounds across six tickets** and produced 30 findings. Not one of them was an improper upgrade to `HARDWARE_ATTESTED`: the trust boundary held in every round of every ticket. What failed, repeatedly, was the *description* of a guarantee and the *checking* of it. Four shapes recurred, and they are the phase's real lesson:
+
+1. **A check matching text near a property rather than at it.** `assert "--require-hashes" in dockerfile` passed because of the comment explaining the flag; deleting the flag from the install command left the suite green.
+2. **A test agreeing with the thing it tests.** A quarantine count asserted against a fixture that always produced exactly that number, so a hardcoded constant passed. A rendered number compared against the formatter that produced it, so `return "7"` for every metric passed.
+3. **Prose asserting an invariant the code did not have** — in six separate rounds, including a comment citing a test that had never been written.
+4. **A self-consistent fiction.** `F8-01` and `F8-02b` both checked `google_service_account`, a claim that does not exist in a real Confidential Space token. Every test passed because the fixtures modelled the same wrong shape. It was found by reading Google's documentation, not by running anything.
+
+**Next phase.** Phase 9 — Hardening, Demo and Launch (90% → 100%).
 
 `F8-01` took **four review rounds**. Rounds 1, 2 and 3 returned `FAIL` with 3, 4 and 4 findings. Every finding was a verification failure escaping `verify_attestation_token` as an unhandled exception, or a comment asserting an invariant the code did not have — never an improper upgrade to `HARDWARE_ATTESTED`, which no round was able to produce. Three separate rounds found a security comment claiming more than the code delivered, which is why the module now ties each asserted invariant to the test that fails if it is violated. Round 4 returned `PASS`.
 
@@ -18,7 +27,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-`F8-05` — the before/after demonstration — is the last buildable ticket in Phase 8. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
+None. Every buildable Phase 8 ticket is done. `F8-02` stays `BLOCKED`: clearing it needs three owner actions — `build.sh --push`, `setup.sh --apply`, and booting a Confidential VM — after which `F8-02` fetches and verifies a real attestation token. It is never marked done on a simulation. `F8-02` stays `BLOCKED`: clearing it needs the owner to run `setup.sh --apply`, push the image, and boot a Confidential VM.
 
 ---
 
@@ -74,6 +83,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 | F8-02b | Confidential Space infrastructure and workload identity | PASS (round 2) — script written and plan-verified; never applied |
 | F8-03 | Trust panel | PASS (round 2) — renders `DEVELOPMENT_ISOLATION`, the real state |
 | F8-04 | Agent 5: Validator and Agent Readiness Score | PASS (round 3) |
+| F8-05 | Before/after demonstration | PASS (round 3) |
 
 ## In progress
 
@@ -134,7 +144,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1391 passing** — 249 web (Vitest/RTL), 1142 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1442 passing** — 262 web (Vitest/RTL), 1180 API (pytest), 3 skipped (2 web, 1 API). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -1207,3 +1217,72 @@ parsing `02_ARCHITECTURE.md` rather than trusting the constant.
 
 **Next intended task.** `F8-05` — the before/after demonstration, the last
 buildable ticket in Phase 8. `F8-02` stays `BLOCKED` on B-04.
+
+---
+
+### 0017 — Phase 8 closes: the before/after demonstration, and what the phase cost
+
+**What was built.** `F8-05`:
+`services/api/src/mcpforge/orchestration/benchmark.py` measures agent
+interaction with the application before and after transformation — interaction
+steps, tasks attempted and completed, errors, retries, approval points, elapsed
+time — and `apps/web/src/components/report/**` renders the comparison.
+`services/api/tests/test_benchmark.py` is 38 tests;
+`apps/web/tests/benchmark-comparison.test.tsx` and `report-format.test.ts` are
+12 more.
+
+**The design decision that carries the ticket.** `MetricCell` is a discriminated
+union whose not-measured member has **no `value` field at all**. "Absent rather
+than defaulted" therefore holds by construction: there is no field for a zero to
+hide in, and `test_an_absence_has_no_value_field_to_default` asserts it across
+`model_fields`, `hasattr` and `model_dump`. `format.ts` refuses to render a
+sub-10ms measurement as `0.00`, because a real measurement displayed as zero is
+the substitution this ticket exists to prevent.
+
+**Both runs are sandboxed identically**, refused twice — before execution in
+`compare` and again at construction in `BenchmarkReport` — and neither may have
+outbound network. `BenchmarkReport._check` rejects a measurement whose `run_id`
+names no run on that side, so traceability is enforced rather than assumed.
+
+**Review gate outcome.** `PASS` on the third round; rounds 1 and 2 returned
+`FAIL` with 1 and 3 findings. **Every one was a test that could not fail, and
+all four were in the rendering tier while the measurement tier was sound
+throughout.**
+- A test that called `render()` and then never queried the DOM — every assertion
+  was against its own JSON fixture. Making the component render `±0` across
+  every unmeasured row left all four tests green: a change computed against a
+  side nobody measured, the exact figure the ticket forbids.
+- An assertion of the form `element.textContent === formatValue(record.value,
+  record.unit)`, which puts the formatter on both sides of the equality.
+  Replacing its body with `return "7";` — every number on screen a 7 — passed.
+- The Change column never compared to `row.delta`. Forcing the sign to `+`
+  rendered a six-error *reduction* as an increase, inverting the direction of
+  the headline comparison, with everything green.
+- The sub-10ms rule asserted in prose with nothing exercising the branch.
+
+The remedy in each case was the same: pin the formatter independently against
+**literal strings**, and derive expected values in the test rather than from the
+code under test.
+
+**What NOT to change accidentally.** `Absence` having no `value` field. The
+sub-10ms branch in `formatSeconds`. The independence of `report-format.test.ts`
+— it is what makes the comparison in `benchmark-comparison.test.tsx` sound. The
+`data-cell` / `data-metric` / `data-run-id` / `data-recorded-at` attributes;
+they are how a test reaches a record rather than other rendered text.
+
+**Phase 8 is complete except `F8-02`.** 21 review rounds across six tickets, 30
+findings, and **not one improper upgrade to `HARDWARE_ATTESTED`** — the trust
+boundary held in every round of every ticket. What kept failing was the
+description of a guarantee and the checking of it.
+
+**Clearing B-04 now needs three owner actions**, in this order, because the
+digest pinned in the attribute condition must match the image actually pushed:
+`bash infra/confidential-space/build.sh --push`, then
+`bash infra/confidential-space/setup.sh --apply`, then booting a Confidential VM
+(N2D or C3D with AMD SEV). Only then can `F8-02` fetch a real attestation token
+and verify it. It is never marked done on a simulation.
+
+**Next intended phase.** Phase 9 — Hardening, Demo and Launch (90% → 100%).
+`F9-01` (the approval-consuming stages that leave `F7-02` and `F7-03`
+`PARTIALLY BLOCKED`), `F9-03` (Playwright E2E, still absent) and `F6-05` (needs
+a public URL) are the known carry-forwards.

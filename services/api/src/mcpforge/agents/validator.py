@@ -462,7 +462,12 @@ export default defineConfig({{
 #: Emitted into every harness file rather than imported from a shared module,
 #: so there is no cross-file resolution to get wrong. It is still one source:
 #: this function.
-def _capture_helper() -> str:
+#:
+#: Public because F8-05's benchmark scenario registers the same generated
+#: toolset against the same stub model context and must see exactly what this
+#: sees. Two implementations of "register the tools and capture what arrives"
+#: is how one of them stops matching the adapter the generator emits.
+def capture_helper() -> str:
     return """interface CapturedTool {
   name: string;
   title?: string;
@@ -530,7 +535,7 @@ import {{ describe, expect, it }} from "vitest";
 
 {_register_import()}
 
-{_capture_helper()}
+{capture_helper()}
 describe("mcpforge registration", () => {{
   it("registers and discovers the tool", async () => {{
     const tools = await registerAndCapture();
@@ -560,7 +565,7 @@ import {{ describe, expect, it }} from "vitest";
 
 {_register_import()}
 
-{_capture_helper()}
+{capture_helper()}
 describe("mcpforge schema validity", () => {{
   it("declares an input schema matching the approved contract", async () => {{
     const tools = await registerAndCapture();
