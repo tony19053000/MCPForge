@@ -137,6 +137,7 @@ Rules:
 - "Development Isolation" is rendered in a neutral/informational style with the explicit "Not hardware-attested" line. The verified style exists in exactly one branch, reachable only when `TrustLevel == HARDWARE_ATTESTED`.
 - Quarantined-file count links to the list of paths (paths only, never contents).
 - When the browser lacks WebMCP, the panel says "not supported in this browser". When the mock adapter is active it says **MOCK ADAPTER — not real browser WebMCP** in a warning style.
+- **When each trust level appears.** The execution row shows **Development Isolation** with "Not hardware-attested" whenever no in-date, API-verified attestation exists — the default, and the state again once a verified token's `exp` has passed. The verified style appears only when the running API's executor holds evidence produced by `verify_attestation_token` for a relying-party run. Real attestation was demonstrated on 2026-09-11 (run `cs-20260910-234427-b3b40d`), but that does not make the panel show the verified state by itself: the panel reports the running server's own current evidence, never a past run's record.
 
 ## 9. Agent readiness report
 

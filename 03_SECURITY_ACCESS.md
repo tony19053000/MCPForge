@@ -180,7 +180,15 @@ image has never been launched by Confidential Space; the launch-policy labels
 are asserted on the image and their enforcement has not been observed. Blocker
 B-04 stands.
 
-**Who verifies (F8-02; the ticket stays `BLOCKED`).** Attestation means
+> **Superseded on 2026-09-11.** The paragraph above is the state before the
+> real run and is kept as written. The owner then pushed `sha256:cebf7ea1…`,
+> repinned the provider, created the bucket and removed the stale binding. Run
+> `cs-20260910-234427-b3b40d` booted the production image on AMD SEV, and the API
+> verified its token to `HARDWARE_ATTESTED`; the launcher's own log showed the
+> launch policy parsed and applied — as far as the launcher reports; no
+> forbidden override was attempted, so a refusal was not observed directly. B-04 is closed and `F8-02` is `DONE`.
+
+**Who verifies (F8-02).** Attestation means
 something only to a relying party **outside** the TEE: a workload that checks
 its own token proves nothing, because a malicious image would simply report
 success. So the workload verifies nothing. The MCPForge API is the relying

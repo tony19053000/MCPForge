@@ -290,7 +290,7 @@ Implementations:
 - `DevelopmentSecureExecutor` — ephemeral workspace destroyed by a context manager on success *and* failure; path jail resolving symlinks first; executable allowlist with argument arrays only; a minimal environment so a job cannot read our credentials; CPU, memory, file-size and wall-clock limits, the last enforced by killing the whole process group; and **real network denial** via an unprivileged user+network namespace. Where the kernel disallows unprivileged namespaces the executor **refuses to run** rather than proceeding without the isolation it claims — `network_isolation_available` reports which case applies. `attestation()` returns `None`. Trust level `DEVELOPMENT_ISOLATION`.
 
   What it is *not*: an allowlisted `node` or `python3` can still read any file the running user can read. That is inherent to development isolation and is why the production target is Confidential Space.
-- `ConfidentialSpaceSecureExecutor` (`execution/confidential_space.py`, F8-02) — the **relying party's** executor, in the API service. It never sees the TEE directly: the workload requests a token from the Confidential Space launcher with an audience the API issued and writes it to a private bucket object; `verify_run` fetches that object and verifies it with `verify_attestation_token` against the API's issued audience, the digest in the API's **own** configuration, the workload service account and Google's discovery-document keys, consuming the run so it verifies once. `trust_level` is the verified outcome's level while its `exp` holds, else `DEVELOPMENT_ISOLATION`; `attestation()` returns F8-01's evidence or `None`. It runs **no** job in any state — `AttestationRequiredError` without evidence, `NoAttestedJobRunnerError` with it — because the attested workload has no job runner and a job on the API host is not inside the attested boundary. The workload's own exit status is a self-report about delivery, not attestation. `F8-02` stays `BLOCKED` until a real run produces a token the API verifies.
+- `ConfidentialSpaceSecureExecutor` (`execution/confidential_space.py`, F8-02) — the **relying party's** executor, in the API service. It never sees the TEE directly: the workload requests a token from the Confidential Space launcher with an audience the API issued and writes it to a private bucket object; `verify_run` fetches that object and verifies it with `verify_attestation_token` against the API's issued audience, the digest in the API's **own** configuration, the workload service account and Google's discovery-document keys, consuming the run so it verifies once. `trust_level` is the verified outcome's level while its `exp` holds, else `DEVELOPMENT_ISOLATION`; `attestation()` returns F8-01's evidence or `None`. It runs **no** job in any state — `AttestationRequiredError` without evidence, `NoAttestedJobRunnerError` with it — because the attested workload has no job runner and a job on the API host is not inside the attested boundary. The workload's own exit status is a self-report about delivery, not attestation. On 2026-09-11 a real run (`cs-20260910-234427-b3b40d`, production image, AMD SEV) produced a token the API verified to `HARDWARE_ATTESTED`, and `F8-02` is `DONE`. That run established attestation, not execution: no repository job has run inside the attested boundary.
 
 **Trust levels are an enum with exactly one meaning each:** `DEVELOPMENT_ISOLATION` and `HARDWARE_ATTESTED`. `HARDWARE_ATTESTED` is only ever set by code that has actually verified an attestation token. There is no path that sets it optimistically, and the UI renders the enum, not a boolean.
 
@@ -332,14 +332,14 @@ it is defence in depth ahead of those three.
 
 `build.sh` builds reproducibly — the digest is a function of content alone, with
 three separate clock and cache leaks found and closed in review — and prints the
-digest. `--push` **would** publish and then verify that the registry reports the
-same digest; that path has never been run.
+digest. `--push` publishes and then verifies that the registry reports the same
+digest; the owner ran it for `sha256:cebf7ea1…` on 2026-09-11.
 `services/api/tests/test_workload_image.py` builds the real image and reads the
-real layers of it. The owner pushed an earlier build (`sha256:76a88540…`); the
-current tree's digest in the README is a local build's and is not pushed. Since
-`F8-02` the workload runs preflight, then obtains an attestation token and
-delivers it to the relying party; it verifies nothing and has never run under
-a real launcher. See `03_SECURITY_ACCESS.md` §2.
+real layers of it. The owner pushed `sha256:cebf7ea1…`, the digest
+recorded in the README, and it is the only digest the workload identity trusts.
+Since `F8-02` the workload runs preflight, then obtains an attestation token and
+delivers it to the relying party; it verifies nothing itself. It ran under the
+real Confidential Space launcher on 2026-09-11 (`cs-20260910-234427-b3b40d`). See `03_SECURITY_ACCESS.md` §2.
 
 **Launch configuration (F8-02).** Every name in the entrypoint's
 `REQUIRED_ENVIRONMENT` — run id and audience, both issued by the API — is a

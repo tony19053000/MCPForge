@@ -74,6 +74,8 @@ ENV_EXAMPLE = REPO_ROOT / ".env.example"
 #: The digest F8-02a produced, read from the README rather than retyped, so that
 #: this file cannot pin a digest the build does not produce.
 _README_DIGEST = re.compile(r"^digest:\s*(sha256:[0-9a-f]{64})$", re.MULTILINE)
+#: A run id as the relying party issues it (`relying_party begin`), in backticks.
+_ISSUED_RUN_ID = re.compile(r"`cs-\d{8}-\d{6}-[0-9a-f]{6}`")
 
 #: Claim paths, as they appear on the left of a clause.
 IMAGE_DIGEST_PATH = "assertion.submods.container.image_digest"
@@ -890,11 +892,35 @@ def test_the_env_example_declares_the_new_names_with_no_values() -> None:
 
 
 def test_the_readme_records_the_live_verification_state_honestly() -> None:
-    """The record exists, names what would be recorded, and does not claim a run."""
+    """The records exist, and a verified state is claimed only beside its evidence.
+
+    Written before any real run, this test forbade `HARDWARE_ATTESTED` in the
+    records outright — right while no run existed. After the verified run of
+    2026-09-11 the README states it truthfully, so the guard now requires the
+    claim to sit beside the record that justifies it: a run id in the form the
+    relying party issues, the exact trusted digest (the README's own `digest:`
+    line, read by `_README_DIGEST`), the relying party's `verified: true`, and
+    the replay refusal. Self-report phrasing stays forbidden everywhere in the
+    records, because a workload's own account of itself is not attestation.
+    """
 
     text = README.read_text(encoding="utf-8")
     assert "Live verification record" in text
     assert "F8-02b" in text
-    for claim in ("HARDWARE_ATTESTED", "attestation verified", "TEE VERIFIED"):
-        section = text.split("Live verification record", 1)[1]
-        assert claim not in section, f"the verification record claims {claim!r}"
+    records = text.split("Live verification record", 1)[1]
+    for phrase in ("attestation verified", "TEE VERIFIED"):
+        assert phrase not in records, (
+            f"the verification record uses self-report phrasing {phrase!r}"
+        )
+    if "HARDWARE_ATTESTED" not in records:
+        return
+
+    heading = "## Live verification record — `F8-02`, the real attestation run"
+    assert heading in text, "HARDWARE_ATTESTED is claimed with no F8-02 run record beside it"
+    run_record = text.split(heading, 1)[1]
+    digest = _README_DIGEST.search(text)
+    assert digest is not None, "the README records no digest"
+    assert _ISSUED_RUN_ID.search(run_record), "the run record names no issued run id"
+    assert digest.group(1) in run_record, "the run record does not carry the trusted digest"
+    assert "`verified: true`" in run_record, "the run record omits the relying party's verification"
+    assert "RUN_ALREADY_CONSUMED" in run_record, "the run record omits the replay refusal"

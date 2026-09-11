@@ -13,13 +13,11 @@ and one comparison, in `setup_scan.py`, shared by the script and by
 review rounds to two implementations of one rule drifting apart; that is why
 this is arranged the way it is.
 
-**Status (observed read-only, 2026-09-11).** The project owner ran `--apply` at
-the earlier digest `sha256:76a8854085f69afc3938d2fb88c41dde96ff7d5757fb13cb96d5bc1feaadc1db`,
-the only image in the registry: the `mcpforge-attestation` provider is live and
-its condition pins that digest. What this document declares below — the digest
-`sha256:cebf7ea1…`, the attestation bucket and its bucket-scoped role — is
-**not applied**: the new digest is not pushed, the repin has not been run, and
-the bucket does not exist. The live verification record is in `README.md`.
+**Status (observed read-only, 2026-09-11).** What this document declares is what
+is live: the provider's condition pins `sha256:cebf7ea1…`, the attestation
+bucket exists with its bucket-scoped role, the stale `76a88540…` binding was
+removed, and `setup.sh --verify` reports no drift. The live verification record,
+including the real attestation run, is in `README.md`.
 
 ---
 
@@ -286,18 +284,21 @@ principal sets require the number.
 
 ## 6. What this document does not claim
 
-- **This document's current declaration is not what is live.** The owner
-  applied the script at `sha256:76a88540…`; the repin to the digest above and
-  the attestation bucket are planned, not applied. See `README.md` for the live
-  verification record.
+- **This document's declaration is what is live** (`setup.sh --verify`,
+  2026-09-11, no drift).
 - **The tests do not evaluate CEL the way Google does.** `setup_scan.py` holds a
   small evaluator over the subset this condition uses — `&&`, `==`, `in`,
   dotted paths, string and list literals — and refuses anything outside it. It
   proves that a debug token, a wrong-digest token, a non-confidential-hardware
   token and a wrong-service-account token all fail *this expression*. It does
   not prove that Google IAM accepts the expression, evaluates it identically, or
-  that Confidential Space emits the claim names assumed here. Those four are
-  live verification, and they are unverified.
+  that Confidential Space emits the claim names assumed here. Of those four,
+  the claim names are now confirmed — the verified run's real token carried
+  exactly these claims and values — and Google accepted the expression when
+  `setup.sh --apply` wrote it. Whether IAM *evaluates* it identically was not
+  exercised: that run delivered its token with the VM's attached service
+  account, not through federation.
 - **A correct condition is not an attestation.** `F8-02` — obtaining a real
-  token, verifying it and reporting `HARDWARE_ATTESTED` — remains `BLOCKED`, and
-  the product continues to report `DEVELOPMENT_ISOLATION` until it is real.
+  token, verifying it in the API and reporting `HARDWARE_ATTESTED` — was
+  demonstrated on 2026-09-11 (run `cs-20260910-234427-b3b40d`), and it rests on the
+  relying party's verification, not on this condition.

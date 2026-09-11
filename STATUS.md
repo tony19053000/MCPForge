@@ -6,11 +6,11 @@
 
 ## Overall completion
 
-**90%** — Phase 8 complete except `F8-02`, which is `BLOCKED` on B-04 and is never marked done on a simulation. `F8-01`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` verified by `[REVIEWER / TESTER]` on rounds 4, 7, 2, 2, 3 and 3. **`F8-02`'s code side passed review on 2026-09-11**; what remains is an owner-run Confidential Space VM, and the percentage does not move until that run's token is verified by the API.
+**90%** — **Phase 8 complete.** All seven Phase 8 tickets are `DONE`, including `F8-02`, whose acceptance was a real Confidential Space run: on 2026-09-11 run `cs-20260910-234427-b3b40d` produced a Google-signed token that the MCPForge API verified to `HARDWARE_ATTESTED`. The 90% recorded earlier while `F8-02` was blocked was provisional; it is now earned. Phase 9 (90% → 100%) has not started.
 
 ## Current phase
 
-**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — **complete except `F8-02`**. `F8-01`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` are `DONE`. `F8-02` is `BLOCKED` on blocker B-04 and will not be simulated.
+**Phase 8 — Confidential Execution + Trust Layer (80% → 90%)** — **complete.** `F8-01`, `F8-02`, `F8-02a`, `F8-02b`, `F8-03`, `F8-04` and `F8-05` are `DONE`. Blocker B-04 is closed by a real, API-verified attestation run (Context State Log entry 0019).
 
 Phase 8 took **21 review rounds across six tickets** and produced 30 findings. Not one of them was an improper upgrade to `HARDWARE_ATTESTED`: the trust boundary held in every round of every ticket. What failed, repeatedly, was the *description* of a guarantee and the *checking* of it. Four shapes recurred, and they are the phase's real lesson:
 
@@ -27,7 +27,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-None. `F8-02`'s code side — launcher token retrieval, relying-party verification in the API, bucket transport — passed review. `F8-02` stays `BLOCKED` until a real Confidential Space run produces a token **the API service** verifies against its own pinned digest and the nonce it issued. Three owner actions remain, in order: `bash infra/confidential-space/build.sh --push`, then `bash infra/confidential-space/setup.sh --apply`, then issue a run with `python -m mcpforge.relying_party begin` and launch it with `launch.sh --run-id <id> --apply` on the production `confidential-space` family. It is never marked done on a simulation.
+None. Phase 8 is complete. Next is Phase 9 — Hardening, Demo and Launch (90% → 100%). Known carry-forwards: `F9-01` (approval-consuming stages; `F7-02`/`F7-03` are `DONE, PARTIALLY BLOCKED`), `F9-03` (Playwright E2E, still absent), `F6-05` (needs a public URL), and — new with `F8-02` — **running repository jobs inside the attested boundary**: the attested workload performs preflight and attestation only, and `ConfidentialSpaceSecureExecutor` refuses every job in every state.
 
 ---
 
@@ -84,6 +84,7 @@ None. `F8-02`'s code side — launcher token retrieval, relying-party verificati
 | F8-03 | Trust panel | PASS (round 2) — renders `DEVELOPMENT_ISOLATION`, the real state |
 | F8-04 | Agent 5: Validator and Agent Readiness Score | PASS (round 3) |
 | F8-05 | Before/after demonstration | PASS (round 3) |
+| F8-02 | ConfidentialSpaceSecureExecutor | PASS (code review round 2) and a real run, `cs-20260910-234427-b3b40d`, verified by the API to `HARDWARE_ATTESTED` on 2026-09-11 |
 
 ## In progress
 
@@ -105,7 +106,7 @@ Phases 8–9, tickets `F8-01` through `F9-05`, plus `F6-05` (GitHub webhook, nee
 | B-02 | ~~No Firebase project~~ — **resolved** | Firebase project created, Google sign-in enabled, ADC configured locally. The quota project was originally `launchforge-tee`; MCPForge is now pinned to the single canonical project `mcpforge-aa5c2` (see the Google Cloud identifiers section below) | Closed |
 | B-05 | Service-account key downloads blocked by organization policy | No impact — the architecture was changed to need none. Token verification uses Google's public JWKS; other server-side Google access uses ADC | Closed by design change, not outstanding |
 | B-03 | ~~No GitHub App~~ — **resolved** | App 4797679 registered and installed on `tony19053000`, scoped to selected repositories. Verified live: contents=write, pull_requests=write, metadata=read, and nothing else | Closed |
-| B-04 | No verified Confidential Space run | `F8-02` is `BLOCKED` and **will not be simulated or marked done.** Live state (read-only, 2026-09-11): the registry holds `sha256:76a88540…`, pushed 2026-09-10; the `mcpforge-attestation` provider is live and pinned to it. A paid VM run on 2026-09-10 failed — the launch passed no `tee-env-*` values, and no code requested a token — and the VM was deleted. `F8-02`'s code side has since passed review: the new image `sha256:cebf7ea1…` is built locally, not pushed; the attestation bucket and its write grant are planned in `setup.sh`, not applied. Clearing B-04 needs three owner actions: `build.sh --push`, `setup.sh --apply`, then a relying-party-issued run launched on the production family | Open — code complete; awaiting an owner-run VM |
+| B-04 | ~~No verified Confidential Space run~~ — **resolved** | Closed 2026-09-11 by run `cs-20260910-234427-b3b40d`: production `confidential-space` image on `n2d-standard-2`, AMD SEV, `us-central1-b`, booting `workload@sha256:cebf7ea1…`. The workload obtained a Google-signed token from the launcher and delivered it; the MCPForge API verified it — RS256 against Google's published keys, issuer, audience equal to the API-issued nonce, expiry, `swname=CONFIDENTIAL_SPACE`, `dbgstat=disabled-since-boot`, `STABLE` support, `hwmodel=GCP_AMD_SEV`, the exact digest from the API's own configuration, and the workload service account — reaching `HARDWARE_ATTESTED`. A second verification of the same run was refused with `RUN_ALREADY_CONSUMED`. The VM was deleted; no instance or disk remains | Closed |
 
 None of these block Phase 1. Work continues on everything that can be built and tested without them.
 
@@ -125,6 +126,8 @@ fixture and document uses these values and no others.
 | Image path | `us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/<image>` |
 | Workload service account | `mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com` |
 | Fixture zone | `us-central1-a` |
+| Launch zone | `us-central1-b` (the zone of the verified run; `launch.sh`) |
+| Trusted workload digest | `sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765` |
 
 **`launchforge-tee` and `launchforge-secure-executor` are not MCPForge
 resources and must never be referenced.** `launchforge-tee` is a real,
@@ -168,7 +171,7 @@ because the log records what was true at the time.
 | Generated code | Every model-authored string passes through `generation/escaping.py` before becoming part of a file. Generated output is scanned for credentials before it is emitted. Generated tools validate declared types at runtime, not only presence |
 | Approval binding | Decisions bind to the artifact hash shown; a changed artifact closes the gate. Actor comes from the verified token, never a request body |
 | Chain-of-thought | Never sent by the API and never rendered by the UI. Both tiers assert it independently |
-| Attestation | **Verification implemented (`F8-01`); no attestation is obtained, and none is simulated.** `execution/attestation.py` defines the trust enum, the evidence record, a failure taxonomy, an `AttestationPolicy` and `verify_attestation_token` — the one function permitted to produce `HARDWARE_ATTESTED`, and only after checking signature, algorithm, issuer, single audience, expiry, not-before, required claims, workload service account, exact image digest, hardware model, software stack and debug status. Every failure returns `DEVELOPMENT_ISOLATION` with no evidence and a named reason. Two AST sweeps over every backend module assert that exactly one function produces the attested level and exactly one constructs evidence; both match on names and neither is claimed to defeat `getattr` indirection. Nothing calls the verifier yet: `F8-02` is `BLOCKED` on B-04, the executor still reports `DEVELOPMENT_ISOLATION`, and `/healthz` reports `hardware_attested: false` |
+| Attestation | **Real, and verified by a relying party outside the TEE.** `verify_attestation_token` is still the only producer of `HARDWARE_ATTESTED`, pinned by the AST sweeps. The MCPForge API issues each run's nonce, the workload delivers a Google-signed token through a private bucket, and the API verifies it against the nonce it issued and the digest in its own configuration, once. Demonstrated on real hardware on 2026-09-11 (run `cs-20260910-234427-b3b40d`). `HARDWARE_ATTESTED` is per run and lasts only while the verified token is in date; otherwise, and by default, the product reports `DEVELOPMENT_ISOLATION`. The attested workload runs **no** repository job, so no job has yet executed inside the attested boundary. `/healthz` still reports `hardware_attested: false`, because it describes the development executor the service runs by default |
 | Secret filtering | Implemented. A fixture repository with thirteen planted credentials yields zero secret bytes downstream, and none in the quarantine records either. Quarantined files are never opened, and matching is case-folded — an earlier version read `.ENV`, `ID_RSA` and `Server.PEM` |
 | Network isolation | Real, via an unprivileged user+network namespace. Where the kernel disallows it the executor refuses to run rather than claiming an isolation it lacks |
 | Repository access mode | Implemented. `READ_ONLY` by default; elevation requires the project owner and records who and when; a demo project can never be elevated |
@@ -1386,3 +1389,76 @@ then `bash infra/confidential-space/setup.sh --apply`, then issue a run with
 `launch.sh`; the digest taken from the API's configuration, never the token; the
 two replay guards; the bucket-scoped create-only grant; the production image
 family.
+
+---
+
+### 0019 — F8-02 closes on real hardware, and B-04 is resolved
+
+**What happened.** One paid Confidential Space run, authorised by the project
+owner, on 2026-09-11. Run `cs-20260910-234427-b3b40d` was issued by the MCPForge
+relying party, launched by `launch.sh` as
+`mcpforge-cs-20260910-234427-b3b40d` — production image family
+`confidential-space`, `n2d-standard-2`, AMD SEV, `us-central1-b` — booting
+`us-central1-docker.pkg.dev/mcpforge-aa5c2/mcpforge-executor/workload@sha256:cebf7ea1…`.
+
+**The evidence.**
+- The launcher's own log shows the image pulled by exactly that digest, the
+  launch policy parsed and applied — as far as the launcher reports; no
+  forbidden override was attempted, so a refusal was not observed (only `MCPFORGE_RUN_ID` and
+  `MCPFORGE_ATTESTATION_AUDIENCE` overridable, both redacted in its log,
+  `log_redirect` never), `/v1/token called`, and "workload task ended and
+  returned 0" after 1.9 s. The production image then shut the VM down.
+- `python -m mcpforge.relying_party verify cs-20260910-234427-b3b40d` returned
+  `verified: true`, `trust_level: HARDWARE_ATTESTED`, `consumed: true`.
+- The delivered token's claims, read back without printing the token: RS256;
+  issuer `https://confidentialcomputing.googleapis.com`; audience exactly the
+  nonce the API issued for this run; one-hour validity; `swname`
+  `CONFIDENTIAL_SPACE`; `dbgstat` `disabled-since-boot`; `support_attributes`
+  `LATEST`, `STABLE`, `USABLE`; `hwmodel` `GCP_AMD_SEV`; image digest exactly
+  `sha256:cebf7ea1…`; `google_service_accounts` exactly the workload service
+  account.
+- **Replay was refused on the real token.** A second verification of the same
+  run returned `RUN_ALREADY_CONSUMED` and `DEVELOPMENT_ISOLATION`.
+- The VM was deleted immediately after. No instance and no disk remain, so no
+  compute is billing.
+
+**Housekeeping before the run.** `.env` was missing three settings the relying
+party needs — `CONFIDENTIAL_SPACE_IMAGE_DIGEST`,
+`CONFIDENTIAL_SPACE_WORKLOAD_SERVICE_ACCOUNT` and
+`CONFIDENTIAL_SPACE_ATTESTATION_BUCKET` — and would have refused every token.
+They were filled from `setup.sh`'s own constants rather than retyped. The
+workload service account's `workloadIdentityUser` binding for the retired digest
+`sha256:76a88540…` was removed at the owner's direction, leaving only
+`cebf7ea1…`, and `setup.sh --verify` reported no drift. The launch zone moved to
+`us-central1-b` (commit `a4c2774`).
+
+**What this does and does not establish.** It establishes that attestation is
+real end to end: a token Google signed, for this exact image on genuine AMD SEV
+hardware in a production (non-debug) Confidential Space, verified by a relying
+party outside the TEE against a nonce it chose and a digest it pins. It does
+**not** establish that repository jobs run inside the attested boundary — the
+workload performs preflight and attestation only, and
+`ConfidentialSpaceSecureExecutor` refuses every job in every state. That is
+recorded as a Phase 9 carry-forward rather than implied by `F8-02` being done.
+`HARDWARE_ATTESTED` is per run and lasts only while the verified token is in
+date; by default the product reports `DEVELOPMENT_ISOLATION`.
+
+**One piece of prose deliberately left stale.** The module docstring in
+`services/api/src/mcpforge/execution/confidential_space.py` still says the
+ticket is `BLOCKED`. That file is inside the attested image, so editing even a
+docstring would move the digest and un-trust the image that was just verified.
+It will be corrected the next time the image is rebuilt and re-attested for a
+real reason. The same applies to every file the Dockerfile copies.
+
+**Unexplained, and recorded rather than guessed.** The first, failed VM run
+reportedly listed `MCPFORGE_WORKSPACE_ROOT` as missing although the pushed image
+carried it. The path-jail root is now an in-code constant, so the question no
+longer affects anything, but it was never explained.
+
+**Completion.** 90%, now earned. Phase 8 is complete; Phase 9 (90% → 100%) has
+not started.
+
+**What NOT to change accidentally.** Any file the workload image carries — it
+would move the trusted digest. The relying party as the only route to
+`HARDWARE_ATTESTED`. The API-issued nonce and the single-use run record. The
+production image family in `launch.sh`.

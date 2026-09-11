@@ -18,13 +18,13 @@ there, and prove it by test rather than by reading the Dockerfile.
 | | |
 |---|---|
 | Image builds | Yes, reproducibly, from a clean checkout |
-| Image pushed to Artifact Registry | **An earlier build only.** `sha256:76a88540…` was pushed on 2026-09-10T18:56 and is the only image in the registry. The digest below — this tree's — **has not been pushed** |
-| Workload identity | The `mcpforge-attestation` provider is live and its condition pins `sha256:76a88540…`, **not** the digest below; the repin has not been applied (observed read-only, 2026-09-11) |
-| Attestation bucket | **Not created.** `setup.sh` now plans it; nobody has applied that |
-| Digest below | A **local** build digest, not a registry digest |
-| Attestation token | Since `F8-02` the image requests one from the launcher and **delivers it** to the relying party; it verifies nothing itself. **Never yet run on real Confidential Space** |
+| Image pushed to Artifact Registry | **Yes.** The digest below was pushed on 2026-09-11 and is tagged `latest`. The retired `sha256:76a88540…` is still stored, untagged, and trusted by nothing |
+| Workload identity | The `mcpforge-attestation` provider's condition pins the digest below; the only `workloadIdentityUser` binding is for it; `setup.sh --verify` reports no drift (2026-09-11) |
+| Attestation bucket | `gs://mcpforge-aa5c2-attestation`, us-central1, uniform access, public access prevention enforced, 1-day lifecycle; the workload service account holds `roles/storage.objectCreator` on it and nothing else |
+| Digest below | The registry digest: `build.sh --push` read it back and it matched the local build |
+| Attestation token | The image requests one from the launcher and **delivers it** to the relying party; it verifies nothing itself. **Ran on real Confidential Space on 2026-09-11** (run `cs-20260910-234427-b3b40d`), and the API verified the token to `HARDWARE_ATTESTED` |
 | Repository job executed | No. There is no job runner in this image |
-| Blocker `B-04` | Still open. `F8-02` stays `BLOCKED` until a real run produces a token that **the API** verifies against its own pinned digest and issued nonce |
+| Blocker `B-04` | **Closed** by that run. `F8-02` is `DONE` |
 
 The image performs preflight, then **obtains an attestation token from the
 Confidential Space launcher and writes it** to
@@ -664,30 +664,27 @@ fails if the run reports any skip at all.
 
 ## Not done here
 
-- This tree's digest is not pushed; the registry holds only `sha256:76a88540…`
-  (pushed by the owner, 2026-09-10T18:56).
-- The workload identity setup was applied by the owner at `sha256:76a88540…`;
-  the repin to this digest and the attestation bucket are planned by `setup.sh`
-  and not applied. No `gcloud` command that changes state was run by `F8-02`.
-- The image obtains and delivers an attestation token (`F8-02`), but it has
-  never run under a real Confidential Space launcher, so no real token has been
-  obtained, delivered or verified, and none is simulated. `F8-02` stays `BLOCKED`.
-- The digest above has not been confirmed against the registry.
-- The Artifact Registry repository `mcpforge-executor` was created by the
-  project owner before this ticket began. No `gcloud` command that changes state
-  was run for `F8-02a`; the only `gcloud` calls made were read-only
-  (`config get-value`, `repositories list`, `images list`).
-- Confidential Space has never launched this image. It has been run under
-  ordinary Docker only, which exercises the entrypoint but not the launch
-  policy: the labels are asserted to be *present and correct on the image*, and
-  their *enforcement* is Confidential Space's, which we have not observed.
+- **No repository job runs inside the attested boundary.** The image performs
+  preflight and attestation, then exits; `ConfidentialSpaceSecureExecutor`
+  refuses every job in every state. `F8-02` established attestation, not
+  attested execution — a Phase 9 carry-forward.
+- **The launch-policy labels were enforced, as far as the launcher reports.**
+  Its log for the verified run printed the parsed launch policy and redacted the
+  two overridable values. We did not attempt an override the policy forbids, so
+  a refusal has not been observed directly.
+- **`F8-02b`'s attribute condition was accepted by Google but not exercised.**
+  The verified run delivered its token with the VM's attached service account,
+  not through workload identity federation, so IAM's evaluation of the condition
+  was not on that path.
+- The retired image `sha256:76a88540…` is still stored in the registry,
+  untagged. Nothing trusts it; deleting it is the owner's choice.
 
 ---
 
 ## Live verification record — `F8-02b`
 
 `setup.sh --apply` **has been run by the project owner, at the earlier digest
-`sha256:76a88540…`.** The operator did not record the run here; the values
+`sha256:76a88540…`,** and re-applied at `sha256:cebf7ea1…` on 2026-09-11 after the push. The operator did not record the run here; the values
 below marked *observed* were read back read-only on 2026-09-11, and nothing is
 filled in that was not observed.
 
@@ -705,20 +702,33 @@ teach the reader something false.
 | Workload identity pool id | `mcpforge-confidential-space` (implied by the provider below) |
 | OIDC provider id | `mcpforge-attestation` — *observed* `ACTIVE` |
 | Workload service account | `mcpforge-workload@mcpforge-aa5c2.iam.gserviceaccount.com` — *observed* |
-| Attribute condition as live on the provider | *observed* pinning `sha256:76a88540…` — **not** this tree's digest |
-| Attestation bucket | *observed* absent (404) |
-| `setup.sh --verify` output | *not recorded* |
+| Attribute condition as live on the provider | *observed* pinning `sha256:cebf7ea1…`, this tree's digest (2026-09-11) |
+| Attestation bucket | *observed* present: us-central1, uniform access, public access prevention enforced, workload SA `objectCreator` only (2026-09-11) |
+| `setup.sh --verify` output | *observed* exit 0 — "no drift and no role beyond policy.md" (2026-09-11) |
 
-**What is true today**, stated so that nothing here is mistaken for progress:
+**What is true today** (2026-09-11):
 
-- The provider pins `sha256:76a88540…`, the only pushed image. This tree's
-  digest is not pushed and not pinned; applying the repin and the bucket is the
-  owner's step, after `build.sh --push`.
-- No Confidential Space VM is running (none observed, 2026-09-11). No
-  attestation token has been obtained by anything, from anywhere.
-- Therefore `F8-02` remains `BLOCKED` on B-04 and the product reports
-  `DEVELOPMENT_ISOLATION`. That is the honest state, not a placeholder for a
-  better one.
+- The provider pins `sha256:cebf7ea1…`, the pushed image, and it is the only
+  digest with a `workloadIdentityUser` binding.
+- `F8-02` is `DONE` and B-04 is closed, by the run recorded below. By default
+  the product still reports `DEVELOPMENT_ISOLATION`; `HARDWARE_ATTESTED` exists
+  only for a verified run, and only while its token is in date.
+
+## Live verification record — `F8-02`, the real attestation run
+
+Recorded by the operator on 2026-09-11. Every value below was observed.
+
+| What | Value |
+|---|---|
+| Run id (issued by the MCPForge API) | `cs-20260910-234427-b3b40d` |
+| Instance | `mcpforge-cs-20260910-234427-b3b40d`, `us-central1-b`, `n2d-standard-2`, AMD SEV |
+| Image family | `confidential-space` (production) |
+| Image | `workload@sha256:cebf7ea1fcb0e898142041507c3a77b7590651a2fb03f14e8f82be548ef89765`, pulled by digest (launcher log) |
+| Launcher | `/v1/token called`; "workload task ended and returned 0" after 1.9 s; VM shut itself down |
+| `relying_party verify` | `verified: true`, `trust_level: HARDWARE_ATTESTED`, `consumed: true` |
+| Token claims (token itself not recorded) | RS256; issuer `https://confidentialcomputing.googleapis.com`; audience = the issued nonce; one-hour validity; `swname` `CONFIDENTIAL_SPACE`; `dbgstat` `disabled-since-boot`; `support_attributes` `LATEST, STABLE, USABLE`; `hwmodel` `GCP_AMD_SEV`; image digest `sha256:cebf7ea1…`; `google_service_accounts` = the workload service account |
+| Replay | second `verify` refused: `RUN_ALREADY_CONSUMED`, `DEVELOPMENT_ISOLATION` |
+| Clean-up | VM deleted; no instance or disk remains |
 
 Filling this table in is not what completes `F8-02`. `F8-02` is complete when a
 real Confidential Space run produces a token that **the MCPForge API** verifies
