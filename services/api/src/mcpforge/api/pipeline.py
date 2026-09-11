@@ -97,7 +97,13 @@ async def _respond(request: Request, step: Awaitable[StepResult]) -> PipelineSte
     except (ApprovalRequiredError, ApprovalNotCurrentError, PullRequestRefusedError) as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except PipelineUnavailableError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        detail = str(exc)
+        # Why no executor is attached, when the factory in `main.py` declined to
+        # build one (T1). Stated, not hidden behind a bare 503.
+        reason = getattr(request.app.state, "executor_unavailable_reason", None)
+        if reason and request.app.state.executor is None:
+            detail = f"{detail} Secure executor not attached: {reason}"
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail) from exc
     except (IllegalTransitionError, PipelineError) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 

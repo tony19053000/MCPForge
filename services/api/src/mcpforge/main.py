@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from enum import Enum
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +26,7 @@ from mcpforge.api import (
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
 from mcpforge.config import SecureExecutorKind, Settings, get_settings
+from mcpforge.execution.development import DevelopmentSecureExecutor
 from mcpforge.execution.provider import SecureExecutionProvider
 from mcpforge.gemini.google_provider import GoogleGenAIProvider
 from mcpforge.gemini.provider import GeminiProvider
@@ -34,6 +37,46 @@ from mcpforge.store.memory import InMemoryStore
 from mcpforge.store.port import Store
 
 VERSION = "0.1.0"
+
+
+class _Unset(Enum):
+    """Distinguishes an omitted `executor` argument from an explicit `None`."""
+
+    OMITTED = "omitted"
+
+
+def build_default_executor(
+    settings: Settings,
+) -> tuple[SecureExecutionProvider | None, str | None]:
+    """The executor this deployment runs with, and why there is none if not.
+
+    - `confidential_space`: the API is the attestation relying party (F8-02);
+      its executor refuses every job and reports an attested level only after
+      it has verified a delivered token.
+    - `development`: `DevelopmentSecureExecutor`, labelled
+      `DEVELOPMENT_ISOLATION` and nothing higher. If this machine cannot deny a
+      job the network (no unprivileged network namespaces), nothing is attached
+      rather than running jobs unisolated; the pipeline's 503 and the startup
+      log state why. Startup is not refused, because `app = create_app()` runs
+      at import and hosts without namespaces (CI runners among them) must still
+      serve health, auth and the trust panel.
+    """
+    if settings.secure_executor is SecureExecutorKind.CONFIDENTIAL_SPACE:
+        from mcpforge.relying_party import build_executor
+
+        return build_executor(settings), None
+
+    executor = DevelopmentSecureExecutor(
+        workspace_root=Path(settings.workspace_root),
+        memory_mb=settings.job_memory_mb,
+    )
+    if not executor.network_isolation_available:
+        return None, (
+            "this machine cannot create unprivileged network namespaces, so a job "
+            "could not be denied the network. MCPForge refuses to run repository "
+            "jobs unisolated."
+        )
+    return executor, None
 
 
 @asynccontextmanager
@@ -64,7 +107,7 @@ def create_app(
     store: Store | None = None,
     gemini: GeminiProvider | None = None,
     github: GitHubAppClient | None = None,
-    executor: SecureExecutionProvider | None = None,
+    executor: SecureExecutionProvider | _Unset | None = _Unset.OMITTED,
     pipeline_options: PipelineOptions | None = None,
 ) -> FastAPI:
     """Build the application.
@@ -72,10 +115,11 @@ def create_app(
     `token_verifier` is injectable so tests exercise the real dependency chain
     with a locally signed key rather than mocking authentication away.
 
-    `executor` is left `None` by default. The pipeline routes (`api/pipeline.py`,
-    F9-01) are the only routes that run a repository job, and without a provider
-    they refuse with 503 rather than assuming one; the trust panel reports the
-    same absence (`api/trust.py`).
+    `executor`, when omitted, is built from settings by `build_default_executor`
+    (T1). Passing one — or an explicit `None`, meaning "no provider" — wins.
+    Without a provider the pipeline routes (`api/pipeline.py`, F9-01) refuse
+    with 503 rather than assuming one; the trust panel reports the same absence
+    (`api/trust.py`).
     """
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_output=settings.is_production)
@@ -96,15 +140,13 @@ def create_app(
     # In-memory is the Phase 2 store. Firestore lands behind the same port later.
     app.state.store = store or InMemoryStore()
     app.state.gemini = gemini or GoogleGenAIProvider(settings)
-    # No default provider in development: the trust panel reports that absence
-    # (`api/trust.py`). With SECURE_EXECUTOR=confidential_space the API is the
-    # attestation relying party (F8-02); its executor refuses every job and
-    # reports an attested level only after it has verified a delivered token.
-    if executor is None and settings.secure_executor is SecureExecutorKind.CONFIDENTIAL_SPACE:
-        from mcpforge.relying_party import build_executor
-
-        executor = build_executor(settings)
+    # An explicitly passed executor (including an explicit None) always wins;
+    # only an omitted argument is built from settings.
+    unavailable_reason: str | None = None
+    if isinstance(executor, _Unset):
+        executor, unavailable_reason = build_default_executor(settings)
     app.state.executor = executor
+    app.state.executor_unavailable_reason = unavailable_reason
     app.state.pipeline_options = pipeline_options or PipelineOptions()
     app.state.github = github or GitHubAppClient(
         app_id=settings.github_app_id,

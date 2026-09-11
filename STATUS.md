@@ -1535,3 +1535,26 @@ skipped, API 1385 / 4 skipped; typecheck, lint and build are clean.
 **Not touched.** The attested image reproduces `sha256:cebf7ea1…9765`.
 
 **Next.** T1: attach the development executor at runtime.
+
+### 0022 — T1: the running service has an executor
+
+**What was built.** `build_default_executor` in `main.py`. `development`
+attaches `DevelopmentSecureExecutor`, labelled `DEVELOPMENT_ISOLATION`;
+`confidential_space` is unchanged. A passed executor, or an explicit `None`,
+still wins.
+
+**Decision.** Fail closed without refusing startup. If the probe cannot create
+an unprivileged network namespace, which is the mechanism jobs rely on, nothing
+is attached and every stage returns 503 with the reason. Health, auth and the
+trust panel keep working.
+
+**Review gate outcome.** `PASS` on round 1, from a Sonnet reviewer that ran
+targeted tests only, per the owner's token-cost request. Full gates were run
+once, by the main session: web 262 / 2 skipped, API 1393 / 4 skipped, build
+clean. Typecheck and lint were rerun after the reviewer briefly reverted
+`main.py` during a mutation check and restored it byte-identical.
+
+**Open.** One intermittent full-suite failure the coder saw once was not
+reproduced, and its name was not captured.
+
+**Next.** T2: persistent store.

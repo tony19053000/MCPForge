@@ -657,7 +657,7 @@ None may weaken a security rule. The project owner ordered this work on
 **Acceptance criteria.** Pipeline stages no longer return 503 in a default development run, and the trust panel reports the executor honestly.
 **Tests.** `create_app` attaches a development executor; the isolation-unavailable case refuses; `confidential_space` is unchanged.
 **Security.** The executor abstraction is not bypassed, and no file in the attested image is touched.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS`, 2026-09-12. Without network namespaces nothing is attached and stages return 503 with the reason; startup does not fail, because `create_app` runs at import.
 
 ### T2 — Persistent run state
 **Purpose.** Runs, approvals, artifacts, failures and PR results survive a page refresh and a process restart.
