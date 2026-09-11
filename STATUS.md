@@ -1610,3 +1610,20 @@ mutation of `outcome_of` caught.
 excerpts unredacted. That is a follow-up.
 
 **Next.** T4: frontend pipeline client.
+
+### 0025 — T4: the web client can drive the real pipeline
+
+**What was built.** `client.ts` gains a `pipeline*` function for every POST and
+GET pipeline route, with `types.ts` mirroring the Pydantic models. A patch file
+fits `DiffView`'s `DiffFile` shape. `ApiError` now carries the server's
+`detail` and a `kind`: `approval_required` (403), `not_found` (404),
+`conflict` (409) or `unavailable` (503). A stage that has not run stays `null`,
+because the backend's 404 means only a missing session.
+
+**Unchanged.** The `agent*` functions, and the error text the self-WebMCP tools
+see.
+
+**Review gate outcome.** `PASS` on round 1, from a Sonnet reviewer that checked
+every route against the backend models, with a mutation caught.
+
+**Next.** T5a: the journey UI from analysis to plan approval.

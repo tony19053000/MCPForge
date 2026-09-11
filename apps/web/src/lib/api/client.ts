@@ -16,7 +16,15 @@ import type {
   AwaitingApprovalDto,
   ChatEvent,
   EventDto,
+  PatchDto,
+  PipelineConnectBody,
+  PipelineStepDto,
+  PipelineWorkflowsBody,
   ProjectDto,
+  PullRequestDto,
+  RunStateDto,
+  SecurityReviewDto,
+  ValidationDto,
   RepositoryDto,
   SessionDto,
   StageDto,
@@ -24,13 +32,67 @@ import type {
   TurnDto,
 } from "@/lib/api/types";
 
+/**
+ * What a failed call means, so the UI can say it plainly. `not_found` is a
+ * missing session or resource; a stage that has not run is a `null` read, not
+ * an error.
+ */
+export type ApiErrorKind =
+  | "unauthenticated" // 401
+  | "approval_required" // 403
+  | "not_found" // 404
+  | "conflict" // 409
+  | "invalid" // 422
+  | "unavailable" // 503 — `detail` carries the server's stated reason
+  | "failed"; // anything else
+
+export function errorKindOf(status: number): ApiErrorKind {
+  switch (status) {
+    case 401:
+      return "unauthenticated";
+    case 403:
+      return "approval_required";
+    case 404:
+      return "not_found";
+    case 409:
+      return "conflict";
+    case 422:
+      return "invalid";
+    case 503:
+      return "unavailable";
+    default:
+      return "failed";
+  }
+}
+
+/** FastAPI's `{"detail": ...}`, or the raw text when the body is not that. */
+function detailOf(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (parsed && typeof parsed === "object" && "detail" in parsed) {
+      const { detail } = parsed as { detail: unknown };
+      return typeof detail === "string" ? detail : JSON.stringify(detail);
+    }
+  } catch {
+    // Not JSON: the raw text is the detail.
+  }
+  return body;
+}
+
 export class ApiError extends Error {
+  /** The server's own reason, unwrapped from `{"detail": ...}`. */
+  readonly detail: string;
+  readonly kind: ApiErrorKind;
+
+  /** `message` stays the raw response body, as it always has been. */
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
     this.name = "ApiError";
+    this.detail = detailOf(message);
+    this.kind = errorKindOf(status);
   }
 }
 
@@ -183,6 +245,97 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ title, body }),
     });
+  }
+
+  // -- the pipeline (F9-01 / T4) -----------------------------------------
+  //
+  // The developer's own actions. The server records them as HUMAN and moves a
+  // gate only on an approval already decided in `/api/approvals` — nothing sent
+  // here can grant one. Reads return `null` for a stage that has not run.
+
+  private pipelinePost(
+    sessionId: string,
+    step: string,
+    body?: object,
+  ): Promise<PipelineStepDto> {
+    return this.request<PipelineStepDto>(`/api/sessions/${sessionId}/pipeline/${step}`, {
+      method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  }
+
+  private pipelineGet<T>(sessionId: string, stage: string): Promise<T> {
+    return this.request<T>(`/api/sessions/${sessionId}/pipeline/${stage}`);
+  }
+
+  pipelineConnect(sessionId: string, body?: PipelineConnectBody): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "connect", body);
+  }
+
+  pipelineAnalyze(sessionId: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "analysis");
+  }
+
+  pipelineSelectWorkflows(sessionId: string, body: PipelineWorkflowsBody): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "workflows", body);
+  }
+
+  pipelinePlan(sessionId: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "plan");
+  }
+
+  /** `approvalId` leaves the TOOL_PLAN gate; omit it to retry a running step. */
+  pipelineGenerate(sessionId: string, approvalId?: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(
+      sessionId,
+      "patch",
+      approvalId === undefined ? undefined : { approval_id: approvalId },
+    );
+  }
+
+  pipelineSecurityReview(sessionId: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "security-review");
+  }
+
+  pipelineValidate(sessionId: string, approvalId: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "validation", { approval_id: approvalId });
+  }
+
+  pipelineRequestPullRequest(sessionId: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "pull-request/request");
+  }
+
+  /** `approvalId` leaves the PULL_REQUEST gate; omit it to retry a running step. */
+  pipelineCreatePullRequest(sessionId: string, approvalId?: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(
+      sessionId,
+      "pull-request",
+      approvalId === undefined ? undefined : { approval_id: approvalId },
+    );
+  }
+
+  pipelineReject(sessionId: string, approvalId: string): Promise<PipelineStepDto> {
+    return this.pipelinePost(sessionId, "reject", { approval_id: approvalId });
+  }
+
+  pipelineState(sessionId: string): Promise<RunStateDto> {
+    return this.pipelineGet<RunStateDto>(sessionId, "state");
+  }
+
+  pipelinePatch(sessionId: string): Promise<PatchDto | null> {
+    return this.pipelineGet<PatchDto | null>(sessionId, "patch");
+  }
+
+  pipelineSecurityReviewResult(sessionId: string): Promise<SecurityReviewDto | null> {
+    return this.pipelineGet<SecurityReviewDto | null>(sessionId, "security-review");
+  }
+
+  pipelineValidationResult(sessionId: string): Promise<ValidationDto | null> {
+    return this.pipelineGet<ValidationDto | null>(sessionId, "validation");
+  }
+
+  pipelinePullRequest(sessionId: string): Promise<PullRequestDto | null> {
+    return this.pipelineGet<PullRequestDto | null>(sessionId, "pull-request");
   }
 
   // -- repositories and access (F7-05) -----------------------------------

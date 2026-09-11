@@ -687,7 +687,7 @@ None may weaken a security rule. The project owner ordered this work on
 **Acceptance criteria.** Every pipeline stage has a client method, and no agent route becomes live.
 **Tests.** Client tests asserting exact paths and bodies.
 **Security.** A bearer token goes on every call, and agents still cannot move a run.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS`, 2026-09-12.
 
 ### T5a — Journey UI: analysis to plan approval
 **Purpose.** A developer can analyse a repository, review workflows and approve a tool plan in the UI.

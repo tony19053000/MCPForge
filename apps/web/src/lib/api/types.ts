@@ -154,6 +154,150 @@ export interface StageDto {
   detail: string;
 }
 
+// -- the pipeline (`/api/sessions/{id}/pipeline`, F9-01 / T3) --------------
+//
+// Mirrors `services/api/src/mcpforge/api/pipeline.py`. Datetimes arrive as ISO
+// strings. A read that returns `null` means the stage has not run — never a
+// default — so every read type below is `T | null` at the client boundary.
+
+export type ArtifactKind =
+  | "ANALYSIS"
+  | "REPOSITORY_BINDING"
+  | "WORKFLOW_SELECTION"
+  | "TOOL_PLAN"
+  | "PATCH"
+  | "SECURITY_REVIEW"
+  | "VALIDATION";
+
+/** `PipelineStepResponse`. `approval`, when set, is the gate this step opened — always PENDING. */
+export interface PipelineStepDto {
+  session_id: string;
+  state: RunState;
+  detail: string;
+  approval: ApprovalDto | null;
+  pull_request_url: string | null;
+}
+
+/** `ConnectBody`. */
+export interface PipelineConnectBody {
+  repository_binding_approval_id?: string | null;
+}
+
+/** `WorkflowsBody`: exactly one of the two. The server enforces that, not this type. */
+export type PipelineWorkflowsBody = { workflow_ids: string[] } | { approval_id: string };
+
+export interface PendingGateDto {
+  gate: ApprovalGate;
+  artifact_kind: ArtifactKind;
+  artifact_hash: string | null;
+  /** May already be decided — the run moves only when a pipeline POST consumes it. */
+  approval: ApprovalDto | null;
+}
+
+export interface RunStateDto {
+  session_id: string;
+  project_id: string;
+  state: RunState;
+  updated_at: string;
+  pending_gate: PendingGateDto | null;
+  failure: string | null;
+}
+
+export type ChangeKind = "add" | "modify";
+
+/**
+ * `DiffFileResponse`. Structurally a `DiffFile` from
+ * `components/diff/diff-view.tsx` (camelCase `affectedTool` is the server's
+ * serialization alias), plus `kind`.
+ */
+export interface PatchFileDto {
+  path: string;
+  kind: ChangeKind;
+  rationale: string;
+  affectedTool: string | null;
+  diff: string;
+  added: number;
+  removed: number;
+}
+
+export interface PatchDto {
+  /** The hash the PATCH and PULL_REQUEST approvals bind to. */
+  artifact_hash: string;
+  summary: string;
+  base_commit: string | null;
+  total_added: number;
+  total_removed: number;
+  files: PatchFileDto[];
+}
+
+export type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export interface FindingDto {
+  rule: string;
+  severity: Severity;
+  summary: string;
+  recommendation: string;
+  evidence: { path: string; symbol: string | null; line: number | null } | null;
+  /** True for findings from our own policy engine rather than the model. */
+  deterministic: boolean;
+}
+
+export interface SecurityReviewDto {
+  completed: boolean;
+  /** The deterministic gate's verdict. The model's own view is `agent_said_pass`. */
+  passed: boolean;
+  reason: string;
+  agent_said_pass: boolean | null;
+  overridden: boolean;
+  findings: FindingDto[];
+}
+
+export interface ValidationCheckDto {
+  check_id: string;
+  component: string | null;
+  description: string;
+  status: "passed" | "failed" | "skipped";
+  exit_code: number | null;
+  timed_out: boolean | null;
+  duration_seconds: number | null;
+  stdout_excerpt: string;
+  stderr_excerpt: string;
+  skip_reason: string | null;
+}
+
+export interface ScoreComponentDto {
+  component: string;
+  label: string;
+  weight: number;
+  points: number;
+  checks_passed: number;
+  checks_executed: number;
+  detail: string;
+}
+
+export interface ValidationDto {
+  /** False when validation could not run at all; then nothing below is evidence. */
+  completed: boolean;
+  passed: boolean;
+  validated: boolean;
+  summary: string | null;
+  reason: string | null;
+  failed_check_ids: string[];
+  unexecuted_tool_checks: string[];
+  checks: ValidationCheckDto[];
+  score: { total: number; max_total: number; components: ScoreComponentDto[] } | null;
+  dependency_source: string | null;
+  dependency_detail: string | null;
+}
+
+export interface PullRequestDto {
+  status: "AWAITING_APPROVAL" | "CREATING" | "FAILED" | "OPENED";
+  url: string | null;
+  number: number | null;
+  branch: string | null;
+  failure: string | null;
+}
+
 // -- trust panel (F8-03, 04_FRONTEND_SPEC.md §8) ---------------------------
 
 /**
