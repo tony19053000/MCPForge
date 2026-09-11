@@ -79,6 +79,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           GITHUB_APP_ID: ${{ secrets.MCPFORGE_GITHUB_APP_ID }}
+          # A failing leg writes its full, redacted validation report here.
+          MCPFORGE_E2E_EVIDENCE_DIR: ${{ runner.temp }}/e2e-evidence
         run: |
           set -o pipefail
           uv run pytest tests/integration/test_e2e_live.py -k "live and ($LEGS)" \
@@ -87,6 +89,15 @@ jobs:
             echo "::error::a live leg skipped while it was required"
             exit 1
           fi
+
+      - name: Keep the validation evidence of a failed leg
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-live-validation-evidence
+          path: ${{ runner.temp }}/e2e-evidence
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Remove the private key
         if: always()

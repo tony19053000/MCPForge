@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from mcpforge.agents.base import Agent, AgentEvidenceError, AgentRun
 from mcpforge.gemini.provider import TraceContext
 from mcpforge.models.analysis import CodebaseAnalysis, RiskClass, Workflow
-from mcpforge.models.index import RepositoryIndex
+from mcpforge.models.index import RepositoryIndex, Symbol, TsType
 from mcpforge.models.toolplan import ProposedToolPlan, ToolPlan, ToolPlanEntry
 from mcpforge.orchestration.toolset import ToolsetConversionError, toolset_from_plan
 
@@ -37,7 +37,14 @@ Rules:
 - A tool must be callable against its function exactly as declared. If the
   function takes positional arguments, the tool's parameters are exactly the
   function's own parameter names, spelled the same way. If it takes one object
-  (shown as `name: {...}`), the tool's parameters are that object's properties.
+  (shown as `name: { field: type; ... }`), the tool's parameters are that
+  object's fields — no others.
+- Types must match the declaration: `json_type` string for `string`, number or
+  integer for `number`, boolean for `boolean`, array for `array`, object for
+  `object`. A field or parameter shown without `?` is required: include it and
+  mark it required. One shown with `?` may be left out or marked not required.
+  A type shown as `unknown-type` is one MCPForge could not read; choose the
+  closest JSON type.
 - Parameters are the business inputs a caller needs. Never accept a table name,
   a file path, a URL, a SQL fragment, a user id, a role, a permission, or a
   token: the application already knows who the caller is, and a tool that takes
@@ -105,6 +112,36 @@ def infer_risk_from_function(function_name: str) -> RiskClass:
     return RiskClass.READ
 
 
+def _kind(ts_type: TsType) -> str:
+    return "unknown-type" if ts_type is TsType.UNKNOWN else ts_type.value
+
+
+def render_parameters(symbol: Symbol) -> list[str]:
+    """Each parameter as the architect sees it — the indexed kinds, never source.
+
+    `createReservation(input: { roomId: string; ...; guests: number })`. Built
+    from the same typed signature the binding check enforces, so the model is
+    shown the rule it will be held to. Falls back to names (and `{...}` for an
+    object) when an index carries no typed signature.
+    """
+    aligned = [p.name for p in symbol.signature] == symbol.params
+    if not aligned:
+        return [f"{p}: {{...}}" if p in symbol.object_params else p for p in symbol.params]
+    rendered: list[str] = []
+    for param in symbol.signature:
+        mark = "?" if param.optional else ""
+        if param.fields is not None:
+            fields = "; ".join(
+                f"{f.name}{'?' if f.optional else ''}: {_kind(f.ts_type)}" for f in param.fields
+            )
+            rendered.append(f"{param.name}{mark}: {{ {fields} }}")
+        elif param.name in symbol.object_params:
+            rendered.append(f"{param.name}{mark}: {{...}}")
+        else:
+            rendered.append(f"{param.name}{mark}: {_kind(param.ts_type)}")
+    return rendered
+
+
 class RiskDiscrepancy(BaseModel):
     """Recorded whenever the model and the deterministic check disagree."""
 
@@ -145,13 +182,11 @@ class WorkflowArchitect(Agent[ArchitectInput, ProposedToolPlan]):
                 f"  files: {', '.join(e.path for e in workflow.evidence)}",
             ]
 
-        lines += ["", "Functions available to call, with their parameters:"]
+        lines += ["", "Functions available to call, with their parameters and types:"]
         for file in payload.index.services:
             for symbol in file.symbols:
                 if symbol.exported and symbol.kind.value == "function":
-                    params = ", ".join(
-                        f"{p}: {{...}}" if p in symbol.object_params else p for p in symbol.params
-                    )
+                    params = ", ".join(render_parameters(symbol))
                     lines.append(f"  {symbol.name}({params})  [{file.path}:{symbol.line}]")
         return "\n".join(lines)
 

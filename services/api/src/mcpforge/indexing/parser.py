@@ -16,7 +16,14 @@ from functools import lru_cache
 import tree_sitter_typescript as ts_typescript
 from tree_sitter import Language, Node, Parser
 
-from mcpforge.models.index import CallSite, Symbol, SymbolKind
+from mcpforge.models.index import (
+    CallSite,
+    Symbol,
+    SymbolKind,
+    TsType,
+    TypedField,
+    TypedParameter,
+)
 
 
 @lru_cache(maxsize=2)
@@ -87,6 +94,105 @@ def _object_params_of(node: Node, source: bytes) -> list[str]:
     return [n for n in found if n]
 
 
+_PREDEFINED: dict[str, TsType] = {
+    "string": TsType.STRING,
+    "number": TsType.NUMBER,
+    "boolean": TsType.BOOLEAN,
+    "object": TsType.OBJECT,
+    "any": TsType.ANY,
+    "unknown": TsType.ANY,
+}
+
+
+def _type_node(annotation: Node | None) -> Node | None:
+    """The type inside a `type_annotation`, or None when there is none."""
+    if annotation is None:
+        return None
+    named = annotation.named_children
+    return named[0] if named else None
+
+
+def _classify(node: Node | None, source: bytes) -> TsType:
+    """A kind only when the syntax alone fixes it. Otherwise UNKNOWN — see TsType."""
+    if node is None:
+        return TsType.UNKNOWN
+    if node.type == "parenthesized_type" and len(node.named_children) == 1:
+        return _classify(node.named_children[0], source)
+    if node.type == "predefined_type":
+        return _PREDEFINED.get(_text(node, source), TsType.UNKNOWN)
+    if node.type == "array_type":
+        return TsType.ARRAY
+    if node.type == "readonly_type" and any(c.type == "array_type" for c in node.named_children):
+        return TsType.ARRAY
+    if node.type == "object_type":
+        return TsType.OBJECT
+    return TsType.UNKNOWN
+
+
+def _fields_of(node: Node | None, source: bytes) -> list[TypedField] | None:
+    """The properties of an inline object type, or None if its shape is not
+    entirely plain named properties (an index signature, a method, a computed
+    key): then the set of allowed keys is not what the syntax lists."""
+    while node is not None and node.type == "parenthesized_type" and node.named_children:
+        node = node.named_children[0]
+    if node is None or node.type != "object_type":
+        return None
+    fields: list[TypedField] = []
+    for member in node.named_children:
+        if member.type == "comment":
+            continue
+        if member.type != "property_signature":
+            return None
+        name_node = member.child_by_field_name("name")
+        if name_node is None or name_node.type != "property_identifier":
+            return None
+        fields.append(
+            TypedField(
+                name=_text(name_node, source),
+                ts_type=_classify(_type_node(member.child_by_field_name("type")), source),
+                optional=any(c.type == "?" for c in member.children),
+            )
+        )
+    return fields
+
+
+def _signature_of(node: Node, source: bytes) -> list[TypedParameter]:
+    """Each parameter's kind, optionality and — for an inline object — fields.
+
+    Names are derived exactly as `_params_of` derives them, so the two lists
+    line up; `orchestration/toolset.py` checks that they do before trusting it.
+    """
+    params_node = node.child_by_field_name("parameters")
+    if params_node is None:
+        return []
+    signature: list[TypedParameter] = []
+    for child in params_node.named_children:
+        if child.type not in ("required_parameter", "optional_parameter"):
+            continue
+        pattern = child.child_by_field_name("pattern")
+        identifier = pattern if pattern is not None else child
+        name = _text(identifier, source).split(":")[0].strip()
+        if not name:
+            continue
+        rest = pattern is not None and pattern.type == "rest_pattern"
+        type_node = _type_node(child.child_by_field_name("type"))
+        signature.append(
+            TypedParameter(
+                name=name,
+                # A rest parameter's annotation is the array of *all* remaining
+                # arguments, not the type of one, so it is not classified.
+                ts_type=TsType.UNKNOWN if rest else _classify(type_node, source),
+                optional=(
+                    child.type == "optional_parameter"
+                    or child.child_by_field_name("value") is not None
+                    or rest
+                ),
+                fields=None if rest else _fields_of(type_node, source),
+            )
+        )
+    return signature
+
+
 def _looks_like_component(name: str, body: str) -> bool:
     """A React component is an exported function starting with a capital that
     returns JSX. Naming alone is not enough, so the body is checked for a tag."""
@@ -134,6 +240,7 @@ def parse_source(source_text: str, *, tsx: bool = True) -> ParsedFile:
                         is_async="async" in body[: body.index("function") + 8],
                         params=_params_of(node, source),
                         object_params=_object_params_of(node, source),
+                        signature=_signature_of(node, source),
                     )
                 )
                 if exported:
@@ -195,10 +302,14 @@ def parse_source(source_text: str, *, tsx: bool = True) -> ParsedFile:
                     )
                     params = _params_of(value_node, source) if value_node else []
                     object_params = _object_params_of(value_node, source) if value_node else []
+                    signature: list[TypedParameter] = (
+                        _signature_of(value_node, source) if value_node else []
+                    )
                 else:
                     kind = SymbolKind.CONST
                     params = []
                     object_params = []
+                    signature = []
                 exported = _is_exported(node)
                 result.symbols.append(
                     Symbol(
@@ -210,6 +321,7 @@ def parse_source(source_text: str, *, tsx: bool = True) -> ParsedFile:
                         is_async=body.lstrip().startswith("async") or " async " in body[:80],
                         params=params,
                         object_params=object_params,
+                        signature=signature,
                     )
                 )
                 if exported:

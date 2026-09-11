@@ -33,6 +33,47 @@ class SymbolKind(StrEnum):
     COMPONENT = "component"
 
 
+class TsType(StrEnum):
+    """What the parser can say, precisely, about a declared TypeScript type.
+
+    Syntax only — tree-sitter, no type checker. Only a type whose meaning is
+    fixed by its syntax is classified: `string`, `number`, `boolean`, `T[]`, an
+    inline `{ ... }`, and `any`/`unknown` (which accept anything). Everything
+    else — a union, a generic, a named alias or interface, a literal type, a
+    missing annotation — is `UNKNOWN`, because resolving it would mean guessing.
+    """
+
+    STRING = "string"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    ARRAY = "array"
+    OBJECT = "object"
+    #: `any` or `unknown`: every value is assignable to it.
+    ANY = "any"
+    UNKNOWN = "unknown"
+
+
+class TypedField(BaseModel):
+    """One property of an inline object-literal type. A kind, never source text."""
+
+    name: str
+    ts_type: TsType = TsType.UNKNOWN
+    optional: bool = False
+
+
+class TypedParameter(BaseModel):
+    """One declared parameter, as far as its syntax says."""
+
+    name: str
+    ts_type: TsType = TsType.UNKNOWN
+    #: Declared with `?` or given a default value, so a call may leave it out.
+    optional: bool = False
+    #: The properties of an inline object-literal type, when the whole shape is
+    #: known. `None` when it is not — a named type, an index signature, a
+    #: method member — so an absent list never reads as "has no fields".
+    fields: list[TypedField] | None = None
+
+
 class Symbol(BaseModel):
     """A named thing in a file. Carries a signature, never a body."""
 
@@ -50,6 +91,13 @@ class Symbol(BaseModel):
     #: (`fn({ a, b })`) apart from a positional one (`fn(a, b)`) without a model
     #: guessing. See `orchestration/toolset.py`.
     object_params: list[str] = Field(default_factory=list)
+    #: Each parameter's type kind, optionality and — for an inline object —
+    #: fields, aligned with `params`. What lets a binding be refused when the
+    #: plan's types or fields do not fit the real declaration (the first live
+    #: F9-01 analysis run generated a call `tsc` rejected). Empty for an index
+    #: persisted before this existed; the binding then records every type as
+    #: not checked rather than assuming one.
+    signature: list[TypedParameter] = Field(default_factory=list)
 
 
 class CallSite(BaseModel):

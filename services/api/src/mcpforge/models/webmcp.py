@@ -106,6 +106,14 @@ class SourceBinding(BaseModel):
     #: The function's own parameter names, taken from the index. For OBJECT
     #: style these are the keys of the single argument.
     parameters: list[str] = Field(default_factory=list)
+    #: Type checks the binding could **not** perform, one sentence each — a
+    #: parameter whose declared type is a union, alias or generic, or an array
+    #: whose element type was not compared. Recorded so nothing reads as
+    #: checked that was not; the application's own typecheck still decides.
+    #: Stored in the tool-plan artifact (`types_not_checked`) and readable via
+    #: `/plan`; displaying it at approval is ticket T5a, not yet built.
+    #: See `orchestration/toolset.py`.
+    unchecked: list[str] = Field(default_factory=list)
 
     @field_validator("parameters")
     @classmethod

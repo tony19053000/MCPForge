@@ -76,7 +76,10 @@ def plan_data(**overrides: object) -> dict[str, Any]:
         "parameters": [
             {"name": "guests", "json_type": "integer", "description": "Number of guests"},
             {
-                "name": "max_price",
+                # `maxPrice`, as `searchRooms` declares it. This fixture said
+                # `max_price` until the binding learnt to refuse a field the
+                # object does not have — a plan that generated TS2353.
+                "name": "maxPrice",
                 "json_type": "number",
                 "description": "Highest nightly price",
                 "required": False,

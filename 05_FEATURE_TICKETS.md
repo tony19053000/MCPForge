@@ -627,3 +627,124 @@ Every ticket below carries all eight fields: **purpose · files · dependencies 
 **Tests.** Two full rehearsal runs from a clean state.
 **Security.** Every approval shown in the demo is a real approval record — the demo must not use a bypass mode, and no such mode may exist.
 **Status.** `PENDING`
+
+---
+
+# PHASE 9 — PRODUCT JOURNEY (from the 2026-09-12 direction audit)
+
+The audit found the backend pipeline correct but unreachable from the UI: a
+developer could sign in and select a repository, then nothing advanced. These
+tickets connect the existing pipeline to the product. They wire existing code
+wherever possible and add new code only where the journey genuinely lacks it.
+None may weaken a security rule. The project owner ordered this work on
+2026-09-12, and it takes priority over polish and new features.
+
+### T0 — Generated-code type binding
+**Purpose.** Generated WebMCP code must compile against the real functions it calls.
+**Files.** `indexing/parser.py`, `models/index.py`, `models/webmcp.py`, `orchestration/toolset.py`, `agents/architect.py`, `orchestration/pipeline.py`, `tests/test_binding_types.py`, `tests/integration/test_e2e_live.py`, `.github/workflows/e2e-live.yml`
+**Dependencies.** F9-01
+**Implementation.** The index records each parameter's TypeScript type and, for an object-literal parameter, each field and whether it is optional. A type the parser cannot read is `UNKNOWN`, never guessed. The binding refuses a missing required field, a field the object does not have, and a JSON type incompatible with a known TypeScript type; a refusal costs the model a bounded retry. The architect prompt shows real types. On failure, the live legs save their evidence redacted.
+**Acceptance criteria.** The two plans whose code failed `tsc` in the first live run are refused at binding. A correctly typed plan's generated code passes a real `tsc --noEmit`. `UNKNOWN` types are recorded as unchecked, never treated as verified. No report or secret reaches the public CI log.
+**Tests.** `tests/test_binding_types.py`, including the real-`tsc` and second-positional-parameter cases; the log-redaction test in `test_e2e_live.py`.
+**Security.** The typecheck and build verdict is not weakened.
+**Status.** `DONE` — reviewer `PASS` on round 2, 2026-09-12.
+
+### T1 — Runtime executor
+**Purpose.** The running service executes the same pipeline the tests exercise.
+**Files.** `services/api/src/mcpforge/main.py`, `config.py`. Nothing under `execution/`.
+**Dependencies.** T0
+**Implementation.** With `SECURE_EXECUTOR=development`, build `DevelopmentSecureExecutor` from settings. If the machine cannot deny a job the network, refuse rather than run unisolated. `confidential_space` keeps the relying-party executor.
+**Acceptance criteria.** Pipeline stages no longer return 503 in a default development run, and the trust panel reports the executor honestly.
+**Tests.** `create_app` attaches a development executor; the isolation-unavailable case refuses; `confidential_space` is unchanged.
+**Security.** The executor abstraction is not bypassed, and no file in the attested image is touched.
+**Status.** `PENDING`
+
+### T2 — Persistent run state
+**Purpose.** Runs, approvals, artifacts, failures and PR results survive a page refresh and a process restart.
+**Files.** `services/api/src/mcpforge/main.py`, `config.py`
+**Dependencies.** T1
+**Implementation.** A `STORE=memory|firestore` setting. `firestore` constructs `FirestoreStore(firebase_project_id)`. `memory` stays the default for tests. Startup fails loudly if Firestore is selected but unreachable.
+**Acceptance criteria.** A run created before a process restart is still readable afterwards, with its approvals and artifacts.
+**Tests.** A store-selection unit test; the existing Firestore conformance suite, live and opt-in.
+**Security.** Owner scoping is preserved. Credentials come from ADC, never a service-account key.
+**Status.** `PENDING`
+
+### T3 — Read routes for the journey
+**Purpose.** The UI can show every stage's result.
+**Files.** `services/api/src/mcpforge/api/` read routes
+**Dependencies.** T2
+**Implementation.** Owner-scoped, read-only routes for the diff, the security verdict, the PR result and the current run state.
+**Acceptance criteria.** Each stored stage result can be fetched by its owner, and only by its owner.
+**Tests.** Route tests, including a refusal for another user's session.
+**Security.** Reads never move a run, and no payload carries a secret.
+**Status.** `PENDING`
+
+### T4 — Frontend pipeline client
+**Purpose.** UI actions call the real pipeline routes.
+**Files.** `apps/web/src/lib/api/client.ts`, `types.ts`
+**Dependencies.** T3
+**Implementation.** `pipeline*` methods for `/api/sessions/{id}/pipeline/*`. The `agent*` methods stay as they are for self-WebMCP, so decision B is unchanged.
+**Acceptance criteria.** Every pipeline stage has a client method, and no agent route becomes live.
+**Tests.** Client tests asserting exact paths and bodies.
+**Security.** A bearer token goes on every call, and agents still cannot move a run.
+**Status.** `PENDING`
+
+### T5a — Journey UI: analysis to plan approval
+**Purpose.** A developer can analyse a repository, review workflows and approve a tool plan in the UI.
+**Files.** `apps/web/src/components/pipeline/**` (new), `workspace-view.tsx`
+**Dependencies.** T4
+**Implementation.** Start analysis. Show the discovered workflows with their risk, and let the developer select or deselect them. Show the tool plan, including names, descriptions, inputs, effects and unchecked types. Approve through the existing `ApprovalCard`.
+**Acceptance criteria.** A developer reaches `TOOL_PLAN_APPROVED` from the UI alone.
+**Tests.** RTL tests for each screen; no approval is created or decided without a human action.
+**Security.** The approval remains the stored decision, and unchecked types are visible at approval.
+**Status.** `PENDING`
+
+### T5b — Journey UI: generation to pull request
+**Purpose.** A developer can generate code, review findings, validation, readiness and the diff, approve, and see the PR.
+**Files.** `apps/web/src/components/pipeline/**`; mount the existing `diff-view.tsx`
+**Dependencies.** T5a
+**Implementation.** Trigger generation, the security review and validation. Show the findings, each check, the readiness score with its reasons and any blocking issues. Mount the existing `DiffView`. Take the final approval through `ApprovalCard`, then show the branch, the PR URL and its status.
+**Acceptance criteria.** A developer reaches `PR_CREATED` from the UI alone, and failures are shown as failures.
+**Tests.** RTL tests; a failed stage renders as failed, never as passed.
+**Security.** The GitHub write requires the final stored approval, and no stage is fabricated.
+**Status.** `PENDING`
+
+### T6 — Pull request description
+**Purpose.** The PR explains what MCPForge did.
+**Files.** `services/api/src/mcpforge/github/pr_description.py`
+**Dependencies.** T5b
+**Implementation.** Add the workflows mapped, the security-review result, readiness, warnings and testing instructions. The description stays deterministic, built from stored artifacts, with no prompts or model reasoning in it.
+**Acceptance criteria.** Every section is present and comes from a stored artifact.
+**Tests.** A unit test per section; a failed security result is never rendered as passed.
+**Security.** No secret or model text appears in the PR body.
+**Status.** `PENDING`
+
+### T7 — Live end-to-end on `mcpforge-test`
+**Purpose.** Prove the journey works for a real developer.
+**Files.** None new. The run is recorded in `STATUS.md`.
+**Dependencies.** T6, plus the owner pushing the demo app and its lockfile to `tony19053000/mcpforge-test`.
+**Implementation.** One real run through the UI, from login to PR, against `tony19053000/mcpforge-test` on an `mcpforge/*` branch.
+**Acceptance criteria.** A real PR is opened from the UI with no manual backend commands; `main` is untouched, and the PR is not merged.
+**Tests.** The manual run itself, recorded with its run id, PR URL and evidence.
+**Security.** Only that repository is used, and at most one PR is opened unless debugging genuinely needs another.
+**Status.** `BLOCKED` — waiting for the owner's push of the starter app
+
+### T8 — Self-WebMCP proposal
+**Purpose.** Decide whether agents may start non-sensitive stages through WebMCP.
+**Files.** A written proposal first; no code until it is approved.
+**Dependencies.** T7
+**Implementation.** Propose which stages, such as analysis, an agent could start, with every approval kept human.
+**Acceptance criteria.** The owner's decision is recorded.
+**Tests.** None until the proposal is approved.
+**Security.** The human-approval model is not weakened.
+**Status.** `PENDING`
+
+### T9 — Before/after demonstration
+**Purpose.** Make the transformation visible.
+**Files.** Wire `orchestration/benchmark.py` to a route; mount `benchmark-comparison.tsx`.
+**Dependencies.** T7
+**Implementation.** Connect the existing benchmark to a route and to the UI, and measure `mcpforge-test` before and after the transformation.
+**Acceptance criteria.** Both sides are measured for real, and nothing is estimated.
+**Tests.** Route tests; the existing F8-05 tests stay unchanged.
+**Security.** The before and after runs are sandboxed identically, as F8-05 requires.
+**Status.** `PENDING`

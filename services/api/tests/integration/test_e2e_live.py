@@ -25,6 +25,9 @@ import asyncio
 import base64
 import json
 import os
+import re
+import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -39,6 +42,7 @@ from mcpforge.execution.development import DevelopmentSecureExecutor
 from mcpforge.gemini.google_provider import GoogleGenAIProvider
 from mcpforge.github.client import GitHubAppClient, GitHubError
 from mcpforge.main import create_app
+from mcpforge.security.filters import CONTENT_PATTERNS
 from mcpforge.store.memory import InMemoryStore
 from tests.conftest import TEST_PROJECT, MakeToken, StubJWKClient
 from tests.integration.harness import (
@@ -122,6 +126,141 @@ def _undecided_is_refused(
     before = d.stored_state(session_id, OWNER)
     d.step(session_id, stage, body, expect=expect)
     assert d.stored_state(session_id, OWNER) == before, f"{stage} moved the run with no decision"
+
+
+EVIDENCE_DIR_ENV = "MCPFORGE_E2E_EVIDENCE_DIR"
+REDACTED = "[redacted]"
+#: A whole PEM private key, not just its header line.
+_PEM_BLOCK = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL
+)
+
+
+def _redact(value: Any, secrets: tuple[str, ...]) -> Any:
+    """Every string in the structure, with known secret values and anything
+    shaped like a credential replaced. Applied to the parsed report, not its
+    JSON text, so an escaped character cannot hide a secret from the match."""
+    if isinstance(value, dict):
+        return {k: _redact(v, secrets) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(v, secrets) for v in value]
+    if not isinstance(value, str):
+        return value
+    for secret in secrets:
+        value = value.replace(secret, REDACTED)
+    value = _PEM_BLOCK.sub(REDACTED, value)
+    for _rule, pattern in CONTENT_PATTERNS:
+        value = pattern.sub(REDACTED, value)
+    return value
+
+
+def redact(value: Any, secrets: Iterable[str | None]) -> Any:
+    """The one redaction for everything a live leg writes to a file **or** to
+    the job log — this repository is public, so an assert message is published.
+    """
+    # Short values are left alone: replacing a 3-character "secret" everywhere
+    # would corrupt the evidence and protect nothing. Longest first, so a
+    # secret containing another is removed whole.
+    known = tuple(sorted({s for s in secrets if s and len(s) >= 8}, key=len, reverse=True))
+    return _redact(value, known)
+
+
+def save_validation_evidence(
+    leg: str, detail: str, validation: dict[str, Any], secrets: Iterable[str | None]
+) -> Path:
+    """A failed leg's full validation report — every check's argv, exit code and
+    stdout/stderr excerpts — written to a file, redacted, and its path printed.
+
+    A paid run that fails must leave what failed behind: the first live run's
+    typecheck and build failures were only diagnosable by paying for a
+    reproduction. Written under `MCPFORGE_E2E_EVIDENCE_DIR` (the manual CI job
+    uploads it) or a fresh temporary directory.
+    """
+    configured = os.environ.get(EVIDENCE_DIR_ENV)
+    directory = Path(configured) if configured else Path(tempfile.mkdtemp(prefix="mcpforge-e2e-"))
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{leg}-validation-evidence.json"
+    body = redact({"leg": leg, "detail": detail, "validation": validation}, secrets)
+    path.write_text(json.dumps(body, indent=1), encoding="utf-8")
+    print(f"\n  [F9-01 {leg}] validation evidence saved to {path}")
+    return path
+
+
+def validation_failure_message(
+    leg: str,
+    detail: str,
+    validation: dict[str, Any],
+    secrets: Iterable[str | None],
+    *,
+    hint: str = "",
+) -> str:
+    """What a failed leg puts in the job log: the redacted summary and the
+    evidence file's path — never the report itself, which goes to the file."""
+    secrets = tuple(secrets)
+    path = save_validation_evidence(leg, detail, validation, secrets)
+    message = f"{detail}{hint} — full validation report (redacted) saved to {path}"
+    return str(redact(message, secrets))
+
+
+def test_a_failed_leg_saves_its_full_validation_evidence_without_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Always runs: the evidence path is not exercised only when money is spent."""
+    monkeypatch.setenv(EVIDENCE_DIR_ENV, str(tmp_path / "evidence"))
+    api_key = "live-gemini-key-value-0123456789"
+    bearer = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJvd25lciJ9.c2lnbmF0dXJlLXZhbHVl"
+    pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nabc\n-----END RSA PRIVATE KEY-----"
+    tsc_error = "src/webmcp/tools/searchRooms.ts(56,38): error TS2322: Type 'string'"
+    validation = {
+        "completed": True,
+        "report": {
+            "checks": [
+                {
+                    "check_id": "typecheck",
+                    "evidence": {
+                        "exit_code": 2,
+                        "stdout_excerpt": f"{tsc_error}\nkey={api_key}",
+                        "stderr_excerpt": f"Authorization: Bearer {bearer}\n{pem}",
+                    },
+                }
+            ]
+        },
+    }
+
+    path = save_validation_evidence("analysis", "failed", validation, [api_key, bearer, None])
+
+    assert path.parent == tmp_path / "evidence"
+    text = path.read_text()
+    for secret in (api_key, bearer, "MIIEow", "BEGIN RSA PRIVATE KEY"):
+        assert secret not in text
+    saved = json.loads(text)["validation"]["report"]["checks"][0]["evidence"]
+    assert saved["exit_code"] == 2
+    assert saved["stdout_excerpt"].startswith(tsc_error)
+    assert REDACTED in saved["stderr_excerpt"]
+
+
+def test_a_failed_legs_log_message_carries_no_secret_and_no_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The assert message is published in a public repository's job log. A
+    secret planted in the report, or in the detail line, must not reach it."""
+    monkeypatch.setenv(EVIDENCE_DIR_ENV, str(tmp_path))
+    api_key = "live-gemini-key-value-0123456789"
+    github_token = "ghp_" + "A" * 36
+    validation = {
+        "report": {
+            "checks": [{"check_id": "build", "evidence": {"stderr_excerpt": f"k={api_key}"}}]
+        }
+    }
+
+    message = validation_failure_message(
+        "pr", f"typecheck failed {github_token}", validation, [api_key], hint=" — see lockfile"
+    )
+
+    assert api_key not in message and github_token not in message
+    assert "stderr_excerpt" not in message, "the report itself went to the log"
+    assert message.startswith(f"typecheck failed {REDACTED} — see lockfile")
+    assert str(tmp_path / "pr-validation-evidence.json") in message
 
 
 def _selectable(workflows_payload: dict[str, Any]) -> list[str]:
@@ -211,7 +350,9 @@ def test_the_analysis_leg_runs_live_on_the_demo_project(
         executor=executor,
     )
     with TestClient(app) as client:
-        d = Driver(client, make_token(subject=OWNER))
+        bearer = make_token(subject=OWNER)
+        d = Driver(client, bearer)
+        secrets = (settings.gemini_api_key, settings.github_app_client_secret, bearer)
         session_id = d.create_session(d.create_project("live demo hotel"))
 
         assert d.step(session_id, "connect")["state"] == "ANALYSIS_PENDING"
@@ -220,7 +361,9 @@ def test_the_analysis_leg_runs_live_on_the_demo_project(
         workflows = d.agent_read(session_id, "workflows")
         assert workflows["available"] is True
         chosen = _selectable(workflows["payload"])
-        assert chosen, f"the analyst found nothing a tool could call: {workflows['payload']}"
+        assert chosen, redact(
+            f"the analyst found nothing a tool could call: {workflows['payload']}", secrets
+        )
         print(f"\n  workflows selected: {chosen}")
 
         asked = d.agent(session_id, "workflows", {"workflow_ids": chosen})
@@ -231,7 +374,9 @@ def test_the_analysis_leg_runs_live_on_the_demo_project(
         d.step(session_id, "workflows", {"approval_id": asked["approval_id"]})
 
         planned = d.step(session_id, "plan")
-        assert planned["state"] == "TOOL_PLAN_APPROVAL_PENDING", planned
+        assert planned["state"] == "TOOL_PLAN_APPROVAL_PENDING", redact(
+            json.dumps(planned), secrets
+        )
         plan_id = planned["approval"]["id"]
         _undecided_is_refused(d, session_id, "patch", {"approval_id": plan_id}, 403)
         _undecided_is_refused(d, session_id, "patch", None, 403)
@@ -239,17 +384,18 @@ def test_the_analysis_leg_runs_live_on_the_demo_project(
         assert d.step(session_id, "patch", {"approval_id": plan_id})["state"] == "PATCH_READY"
 
         reviewed = d.step(session_id, "security-review")
-        assert reviewed["state"] == "PATCH_APPROVAL_PENDING", (
-            f"the live security review did not pass: {reviewed['detail']}"
+        assert reviewed["state"] == "PATCH_APPROVAL_PENDING", redact(
+            f"the live security review did not pass: {reviewed['detail']}", secrets
         )
         patch_id = reviewed["approval"]["id"]
         _undecided_is_refused(d, session_id, "validation", {"approval_id": patch_id}, 403)
         d.decide(patch_id)
         validated = d.step(session_id, "validation", {"approval_id": patch_id})
         report = d.agent_read(session_id, "validation")["payload"]
-        assert validated["state"] == "VALIDATION_PASSED", (
-            f"{validated['detail']}\n{json.dumps(report, indent=1)[:4000]}"
-        )
+        if validated["state"] != "VALIDATION_PASSED":
+            pytest.fail(
+                validation_failure_message("analysis", validated["detail"], report, secrets)
+            )
 
         assert path_of(d.transitions(session_id)) == DEMO_PATH
         plan = d.agent_read(session_id, "plan")
@@ -264,10 +410,10 @@ def test_the_analysis_leg_runs_live_on_the_demo_project(
 
         executed = report["report"]["checks"]
         print(f"  tools          : {[t['name'] for t in plan['payload']['plan']['tools']]}")
-        print(f"  validation     : {validated['detail']}")
+        print(redact(f"  validation     : {validated['detail']}", secrets))
         print(f"  checks run     : {[c['check_id'] for c in executed]}")
-        print(f"  PR request     : refused — {refused['detail']}")
-        print(f"  PR writer      : refused — {writer_refusal}")
+        print(redact(f"  PR request     : refused — {refused['detail']}", secrets))
+        print(redact(f"  PR writer      : refused — {writer_refusal}", secrets))
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +492,9 @@ def test_the_pr_leg_runs_live_on_the_test_repository(
         executor=executor,
     )
     with TestClient(app) as client:
-        d = Driver(client, make_token(subject=OWNER))
+        bearer = make_token(subject=OWNER)
+        d = Driver(client, bearer)
+        secrets = (settings.gemini_api_key, settings.github_app_client_secret, bearer)
         project_id = d.create_project("live test repository")
         session_id = d.create_session(project_id)
 
@@ -370,14 +518,23 @@ def test_the_pr_leg_runs_live_on_the_test_repository(
         d.decide(plan_id)
         d.step(session_id, "patch", {"approval_id": plan_id})
         reviewed = d.step(session_id, "security-review")
-        assert reviewed["state"] == "PATCH_APPROVAL_PENDING", reviewed["detail"]
+        assert reviewed["state"] == "PATCH_APPROVAL_PENDING", redact(reviewed["detail"], secrets)
         d.decide(reviewed["approval"]["id"])
         validated = d.step(session_id, "validation", {"approval_id": reviewed["approval"]["id"]})
-        assert validated["state"] == "VALIDATION_PASSED", (
-            f"{validated['detail']} — the repository's dependencies come from the install "
-            "step, which needs a package-lock.json resolving only from registry.npmjs.org "
-            "(03_SECURITY_ACCESS.md §3)"
-        )
+        if validated["state"] != "VALIDATION_PASSED":
+            pytest.fail(
+                validation_failure_message(
+                    "pr",
+                    validated["detail"],
+                    d.agent_read(session_id, "validation")["payload"],
+                    secrets,
+                    hint=(
+                        " — the repository's dependencies come from the install step, which "
+                        "needs a package-lock.json resolving only from registry.npmjs.org "
+                        "(03_SECURITY_ACCESS.md §3)"
+                    ),
+                )
+            )
 
         # The explicit, recorded elevation. Before it, the gate cannot open.
         d.step(session_id, "pull-request/request", expect=403)
@@ -389,8 +546,8 @@ def test_the_pr_leg_runs_live_on_the_test_repository(
         _undecided_is_refused(d, session_id, "pull-request", {"approval_id": pr_id}, 403)
         d.decide(pr_id)
         done = d.step(session_id, "pull-request", {"approval_id": pr_id})
-        assert done["state"] == "COMPLETE", done
+        assert done["state"] == "COMPLETE", redact(json.dumps(done), secrets)
         url = done["pull_request_url"]
         opened = [e for e in d.events(session_id) if e["label"] == "Pull request opened"]
         assert opened[0]["detail"]["branch"].startswith("mcpforge/webmcp-")
-        print(f"\n  pull request: {url}")
+        print(redact(f"\n  pull request: {url}", secrets))

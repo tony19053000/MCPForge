@@ -744,7 +744,7 @@ class Pipeline:
             )
             # Refused here, before a human is asked to approve something that
             # cannot be generated.
-            toolset_from_plan(plan, index)
+            bound = toolset_from_plan(plan, index)
         except (AgentError, ToolsetConversionError) as exc:
             raise await self._fail(session, "Designing WebMCP tools", exc) from exc
 
@@ -756,6 +756,12 @@ class Pipeline:
                 payload={
                     "plan": plan.model_dump(mode="json"),
                     "risk_discrepancies": [d.model_dump(mode="json") for d in discrepancies],
+                    # What the binding could not type-check. Stored in the
+                    # tool-plan artifact and readable via `/plan`; no UI shows
+                    # it yet — displaying it at approval is ticket T5a.
+                    "types_not_checked": {
+                        t.name: list(t.source.unchecked) for t in bound.tools if t.source.unchecked
+                    },
                 },
             )
         )

@@ -1511,3 +1511,27 @@ non-recursively and missed `tests/integration/`; it now uses `rglob`.
 
 **Next.** The owner's go-ahead for the live analysis leg, then the seed push and
 the live PR leg.
+
+### 0021 — T0: generated code is bound to the real types it calls
+
+**What was built.** The first live PR leg failed `tsc`: `search_rooms` passed
+`guests` as a string and invented a `checkIn` field. The index now records each
+parameter's TypeScript type and object fields, and `toolset_from_plan` refuses a
+missing required field, an unknown field, or an incompatible JSON type, with a
+bounded model retry. A type the parser cannot read is `UNKNOWN`, stored as
+`types_not_checked`, never treated as verified. Live legs write redacted
+evidence on failure; CI uploads it only on failure, for 7 days.
+
+**Owner direction, 2026-09-12.** Connect the existing pipeline into the real UI
+journey. Tickets T0–T9 are recorded in `05_FEATURE_TICKETS.md`.
+
+**Review gate outcome.** `PASS` on round 2. Round 1 found that only the first
+positional parameter was type-checked, and that a failed live leg could log an
+unredacted report. Both were fixed, with mutation-proven tests. Web 262 / 2
+skipped, API 1385 / 4 skipped; typecheck, lint and build are clean.
+
+**Open.** `types_not_checked` is visible only via `/plan` until T5a.
+
+**Not touched.** The attested image reproduces `sha256:cebf7ea1…9765`.
+
+**Next.** T1: attach the development executor at runtime.
