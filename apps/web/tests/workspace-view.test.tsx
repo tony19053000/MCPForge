@@ -41,6 +41,15 @@ const api = {
   getApproval,
   decideApproval,
   bindRepository: vi.fn(),
+  // The journey panel (T5a) reads run state; covered in journey-panel.test.tsx.
+  pipelineState: vi.fn(async () => ({
+    session_id: "sess_1",
+    project_id: "proj_1",
+    state: "PROJECT_CREATED" as const,
+    updated_at: "2026-09-03T10:00:00Z",
+    pending_gate: null,
+    failure: null,
+  })),
   elevateAccess: vi.fn(),
   revokeAccess: vi.fn(),
 };

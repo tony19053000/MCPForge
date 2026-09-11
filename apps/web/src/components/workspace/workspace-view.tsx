@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApprovalCard } from "@/components/approval/approval-card";
+import { JourneyPanel } from "@/components/pipeline/journey-panel";
 import { RepositoryPanel } from "@/components/repo/repository-panel";
 import { TrustPanel } from "@/components/trust/trust-panel";
 import { ActivityTimeline } from "@/components/workspace/activity-timeline";
@@ -45,6 +46,10 @@ export function WorkspaceView() {
   // Server-read security state for the trust panel — F8-03. Null until the
   // first read succeeds: the panel is absent rather than guessed at.
   const [trust, setTrust] = useState<TrustStateDto | null>(null);
+  // The TOOL_PLAN approval the journey panel is showing beside its plan. The
+  // context panel does not repeat it, so the plan decision is taken once, next
+  // to what it covers.
+  const [journeyApprovalId, setJourneyApprovalId] = useState<string | null>(null);
 
   // Registers MCPForge's own WebMCP tools for this session, and tears them down
   // on unmount. Without this the tools exist but nothing can reach them.
@@ -226,7 +231,11 @@ export function WorkspaceView() {
                   onRevoke={async () => setAccess(await api.revokeAccess(project.id))}
                 />
               ) : null}
-              {approval ? (
+              {approval && approval.id === journeyApprovalId ? (
+                <p className="text-sm text-subtle">
+                  The tool plan decision is shown with the plan in the workspace.
+                </p>
+              ) : approval ? (
                 <ApprovalCard
                   approval={approval}
                   onDecide={async (decision) => {
@@ -255,7 +264,16 @@ export function WorkspaceView() {
           </p>
         ) : null}
         {chatSession ? (
-          <Chat sessionId={chatSession.id} transport={api} />
+          <>
+            <div className="max-h-[55vh] shrink-0 overflow-y-auto border-b border-border">
+              <JourneyPanel
+                api={api}
+                sessionId={chatSession.id}
+                onPlanApprovalChange={setJourneyApprovalId}
+              />
+            </div>
+            <Chat sessionId={chatSession.id} transport={api} />
+          </>
         ) : (
           <CenteredNotice title="Starting a session" body="Setting up your workspace." />
         )}

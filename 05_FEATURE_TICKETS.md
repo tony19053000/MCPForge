@@ -694,10 +694,10 @@ None may weaken a security rule. The project owner ordered this work on
 **Files.** `apps/web/src/components/pipeline/**` (new), `workspace-view.tsx`
 **Dependencies.** T4
 **Implementation.** Start analysis. Show the discovered workflows with their risk, and let the developer select or deselect them. Show the tool plan, including names, descriptions, inputs, effects and unchecked types. Approve through the existing `ApprovalCard`.
-**Acceptance criteria.** A developer reaches `TOOL_PLAN_APPROVED` from the UI alone.
+**Acceptance criteria.** From the UI alone, a developer reaches `TOOL_PLAN_APPROVAL_PENDING` with an `APPROVED` decision stored against the plan's hash, or a rejection that returns the run to workflow selection. *(Amended 2026-09-12. No route stops at `TOOL_PLAN_APPROVED`: the approval is consumed by `POST /pipeline/patch`, which then generates code, and that is T5b.)*
 **Tests.** RTL tests for each screen; no approval is created or decided without a human action.
 **Security.** The approval remains the stored decision, and unchecked types are visible at approval.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS`, 2026-09-12.
 
 ### T5b — Journey UI: generation to pull request
 **Purpose.** A developer can generate code, review findings, validation, readiness and the diff, approve, and see the PR.

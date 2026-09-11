@@ -1627,3 +1627,25 @@ see.
 every route against the backend models, with a mutation caught.
 
 **Next.** T5a: the journey UI from analysis to plan approval.
+
+### 0026 — T5a: the journey from connect to plan approval, in the UI
+
+**What was built.** A journey panel in the workspace
+(`components/pipeline/`), with backend state as the only source of truth. It
+re-reads state after every action and every 5s; a failed read shows an error,
+not stale state. Screens cover connect, analyze, workflow selection
+(low-confidence workflows start unticked, per `04_FRONTEND_SPEC.md`) and the
+tool plan. The plan view shows inputs, risk, gated tools and a per-tool "not
+type-checked" badge. Approvals go through the existing `ApprovalCard`, bound to
+the plan's hash, and only on a click. Reject records the decision and returns
+the run to selection. A 503 shows the executor's reason, and malformed payloads
+show an error.
+
+**Ticket amended.** No route stops at `TOOL_PLAN_APPROVED`: `POST
+/pipeline/patch` consumes the approval and generates code. T5a therefore ends at
+a stored approval, and consuming it belongs to T5b.
+
+**Review gate outcome.** `PASS` on round 1, from a Sonnet reviewer. Both
+mutations were caught: forcing every stage to "done", and deciding on mount.
+
+**Next.** T6, which is in parallel, then T5b.
