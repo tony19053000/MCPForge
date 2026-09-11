@@ -667,7 +667,7 @@ None may weaken a security rule. The project owner ordered this work on
 **Acceptance criteria.** A run created before a process restart is still readable afterwards, with its approvals and artifacts.
 **Tests.** A store-selection unit test; the existing Firestore conformance suite, live and opt-in.
 **Security.** Owner scoping is preserved. Credentials come from ADC, never a service-account key.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS`, 2026-09-12. Follow-up: a patch over Firestore's 1 MiB document limit cannot yet be stored.
 
 ### T3 — Read routes for the journey
 **Purpose.** The UI can show every stage's result.

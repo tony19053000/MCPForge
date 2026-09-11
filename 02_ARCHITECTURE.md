@@ -108,7 +108,7 @@ MCPForge/
 | Agent framework | None — ours | LangChain/CrewAI/AutoGen are banned in V1 |
 | Auth | Firebase Authentication — **provisional**, behind a port | Fastest correct path to a real Google sign-in today. Not committed to for production; see §3.2 |
 | Server-side Google credentials | Application Default Credentials (ADC) | Organization policy blocks service-account key downloads. No key file exists or is depended on |
-| Store | Firestore behind a port interface; in-memory adapter for tests | Google ecosystem; swappable |
+| Store | Firestore behind a port interface; in-memory adapter for tests. Selected by `STORE=memory\|firestore` (default `memory`). `firestore` uses `FIREBASE_PROJECT_ID`'s database with ADC; startup refuses if the project id is unset, ADC is absent, or one probe read fails (T2) | Google ecosystem; swappable |
 | GitHub | GitHub App, per-repository installation | Scoped access, short-lived installation tokens |
 | Web tests | Vitest, React Testing Library, Playwright | |
 | API tests | pytest, pytest-asyncio, httpx ASGI transport | |

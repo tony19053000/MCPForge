@@ -23,12 +23,14 @@ from mcpforge.models.core import (
     Origin,
     Project,
     RunEvent,
+    RunState,
     Session,
     Turn,
     artifact_hash,
 )
 from mcpforge.store.memory import InMemoryStore
 from mcpforge.store.port import NotFoundError, Store
+from tests.fake_firestore import FakeFirestore
 from tests.structure import SRC, code_lines, files_importing
 
 # Owner ids are unique per test. The in-memory adapter starts empty every time,
@@ -47,9 +49,11 @@ def unique_identities(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys.modules[__name__], "OTHER", f"uid-stranger-{run}")
 
 
-#: Every adapter runs this same suite, unchanged. Firestore is opt-in because it
-#: needs a real database: MCPFORGE_TEST_FIRESTORE=1 with ADC configured.
-ADAPTERS = ["memory"]
+#: Every adapter runs this same suite, unchanged. `firestore-fake` runs the real
+#: `FirestoreStore` over `tests/fake_firestore.py`, which applies Firestore's
+#: value rules, on every run. Real Firestore is opt-in because it needs a
+#: database: MCPFORGE_TEST_FIRESTORE=1 with ADC configured.
+ADAPTERS = ["memory", "firestore-fake"]
 if os.environ.get("MCPFORGE_TEST_FIRESTORE") == "1":
     ADAPTERS.append("firestore")
 
@@ -58,6 +62,12 @@ if os.environ.get("MCPFORGE_TEST_FIRESTORE") == "1":
 def store(request: pytest.FixtureRequest) -> Iterator[Store]:
     if request.param == "memory":
         yield InMemoryStore()
+        return
+
+    if request.param == "firestore-fake":
+        from mcpforge.store.firestore import FirestoreStore
+
+        yield FirestoreStore("fake-project", client=FakeFirestore())
         return
 
     if request.param == "firestore":
@@ -385,3 +395,106 @@ async def test_an_artifact_hash_is_derived_from_content_not_stored(store: Store)
     )
     assert artifact.hash == artifact_hash({"files": 3})
     assert "hash" not in artifact.model_dump()
+
+
+# -- everything a run persists round-trips (T2) ----------------------------
+#
+# Payloads use the shapes the pipeline stores: nested maps, lists of maps,
+# nulls, unicode and multi-line file contents. The fake adapter applies
+# Firestore's value rules, so a shape Firestore would refuse fails here.
+
+RUN_PAYLOADS: dict[ArtifactKind, dict[str, object]] = {
+    ArtifactKind.ANALYSIS: {"workflows": [{"id": "wf_1", "name": "Book a room", "steps": 3}]},
+    ArtifactKind.REPOSITORY_BINDING: {"repository": "acme/hotel", "branch": "main", "id": 4242},
+    ArtifactKind.WORKFLOW_SELECTION: {"workflow_ids": ["wf_1", "wf_2"]},
+    ArtifactKind.TOOL_PLAN: {
+        "plan": {"tools": [{"name": "search_rooms", "input_schema": {"type": "object"}}]}
+    },
+    ArtifactKind.PATCH: {
+        "base_commit": "abc123",
+        "files": [{"path": "src/webmcp.ts", "kind": "ADD", "contents": "export {};\n// é\n"}],
+    },
+    ArtifactKind.SECURITY_REVIEW: {
+        "completed": True,
+        "verdict": {"passed": False, "reason": "blocked", "findings": [{"id": "F1"}]},
+    },
+    ArtifactKind.VALIDATION: {
+        "completed": False,
+        "validated": False,
+        "reason": "Could not validate",
+        "dependencies": None,
+    },
+}
+
+
+def test_every_artifact_kind_is_covered() -> None:
+    assert set(RUN_PAYLOADS) == set(ArtifactKind)
+
+
+@pytest.mark.parametrize("kind", list(ArtifactKind))
+async def test_every_artifact_kind_round_trips_losslessly(store: Store, kind: ArtifactKind) -> None:
+    _project, session = await make_session(store)
+    written = Artifact(
+        session_id=session.id, project_id=session.project_id, kind=kind, payload=RUN_PAYLOADS[kind]
+    )
+    await store.put_artifact(written)
+    stored = await store.get_artifact(session.id, kind, OWNER)
+    assert stored == written
+    assert stored.hash == written.hash, "the approval hash must survive storage"
+
+
+async def test_a_decided_approval_round_trips_losslessly(store: Store) -> None:
+    _project, session = await make_session(store)
+    approval = await store.create_approval(
+        Approval(
+            project_id=session.project_id,
+            session_id=session.id,
+            gate=ApprovalGate.PULL_REQUEST,
+            artifact_hash=artifact_hash({"files": 1}),
+            summary="Open a pull request",
+        )
+    )
+    decided = approval.model_copy(
+        update={
+            "status": ApprovalStatus.APPROVED,
+            "actor_uid": OWNER,
+            "decided_at": approval.requested_at,
+        }
+    )
+    await store.update_approval(decided, OWNER)
+    assert await store.get_approval(approval.id, OWNER) == decided
+
+
+async def test_a_session_state_change_round_trips(store: Store) -> None:
+    _project, session = await make_session(store)
+    moved = session.model_copy(update={"state": RunState.COMPLETE})
+    await store.update_session(moved)
+    assert await store.get_session(session.id, OWNER) == moved
+
+
+async def test_the_pull_request_result_round_trips_on_its_event(store: Store) -> None:
+    """The PR result is recorded as the "Pull request opened" event."""
+    _project, session = await make_session(store)
+    event = RunEvent(
+        session_id=session.id,
+        kind="artifact.ready",
+        label="Pull request opened",
+        detail={"url": "https://github.test/acme/hotel/pull/12", "number": 12, "branch": "b"},
+    )
+    await store.append_event(event)
+    assert await store.list_events(session.id, OWNER) == [event]
+
+
+async def test_events_and_turns_keep_write_order_when_timestamps_tie(store: Store) -> None:
+    _project, session = await make_session(store)
+    tied = RunEvent(session_id=session.id, kind="k", label="x").created_at
+    labels = [f"event-{i}" for i in range(12)]
+    for label in labels:
+        await store.append_event(
+            RunEvent(session_id=session.id, kind="k", label=label, created_at=tied)
+        )
+        await store.append_turn(
+            Turn(session_id=session.id, role="user", text=label, created_at=tied)
+        )
+    assert [e.label for e in await store.list_events(session.id, OWNER)] == labels
+    assert [t.text for t in await store.list_turns(session.id, OWNER)] == labels

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from enum import Enum
 from pathlib import Path
@@ -25,7 +25,7 @@ from mcpforge.api import (
 )
 from mcpforge.auth.firebase import FirebaseIdTokenVerifier
 from mcpforge.auth.identity import TokenVerifier
-from mcpforge.config import SecureExecutorKind, Settings, get_settings
+from mcpforge.config import ConfigError, SecureExecutorKind, Settings, StoreKind, get_settings
 from mcpforge.execution.development import DevelopmentSecureExecutor
 from mcpforge.execution.provider import SecureExecutionProvider
 from mcpforge.gemini.google_provider import GoogleGenAIProvider
@@ -33,10 +33,34 @@ from mcpforge.gemini.provider import GeminiProvider
 from mcpforge.github.client import GitHubAppClient
 from mcpforge.logging import configure_logging, get_logger
 from mcpforge.orchestration.pipeline import PipelineOptions
+from mcpforge.store.firestore import FirestoreStore
 from mcpforge.store.memory import InMemoryStore
 from mcpforge.store.port import Store
 
 VERSION = "0.1.0"
+
+StartupCheck = Callable[[], Awaitable[None]]
+
+
+def build_default_store(settings: Settings) -> tuple[Store, StartupCheck | None]:
+    """The store this deployment runs with, and the check it must pass at startup.
+
+    - `memory`: `InMemoryStore`. Nothing survives a restart; no check.
+    - `firestore`: `FirestoreStore` on FIREBASE_PROJECT_ID, with ADC. An unset
+      project id is a `ConfigError` here, and missing ADC surfaces from the
+      constructor as `StoreUnavailableError` — both at `create_app`, so both
+      abort import. Reachability needs a network read, so it is returned as a
+      check the lifespan awaits before the service accepts traffic.
+    """
+    if settings.store is StoreKind.FIRESTORE:
+        if not settings.firebase_project_id:
+            raise ConfigError(
+                "STORE=firestore requires FIREBASE_PROJECT_ID, the project whose "
+                "Firestore database holds run state. There is no fallback store."
+            )
+        firestore_store = FirestoreStore(settings.firebase_project_id)
+        return firestore_store, firestore_store.check_reachable
+    return InMemoryStore(), None
 
 
 class _Unset(Enum):
@@ -90,7 +114,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         gemini_configured=settings.gemini_configured,
         github_configured=settings.github_configured,
         secure_executor=settings.secure_executor.value,
+        store=type(app.state.store).__name__,
     )
+    store_check: StartupCheck | None = app.state.store_startup_check
+    if store_check is not None:
+        # Raises StoreUnavailableError, which aborts startup: the service never
+        # accepts a run it could not persist.
+        await store_check()
+    if settings.store is StoreKind.MEMORY:
+        log.warning(
+            "mcpforge.store_ephemeral",
+            detail="STORE=memory; runs, approvals and artifacts are lost on restart",
+        )
     if not settings.auth_configured:
         # Loud in development, impossible in production (require_production_invariants).
         log.warning(
@@ -137,8 +172,13 @@ def create_app(
     app.state.token_verifier = token_verifier or FirebaseIdTokenVerifier(
         settings.firebase_project_id
     )
-    # In-memory is the Phase 2 store. Firestore lands behind the same port later.
-    app.state.store = store or InMemoryStore()
+    # An explicitly passed store always wins and is not probed; only an omitted
+    # one is built from settings (T2).
+    store_check: StartupCheck | None = None
+    if store is None:
+        store, store_check = build_default_store(settings)
+    app.state.store = store
+    app.state.store_startup_check = store_check
     app.state.gemini = gemini or GoogleGenAIProvider(settings)
     # An explicitly passed executor (including an explicit None) always wins;
     # only an omitted argument is built from settings.

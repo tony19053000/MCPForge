@@ -1558,3 +1558,28 @@ clean. Typecheck and lint were rerun after the reviewer briefly reverted
 reproduced, and its name was not captured.
 
 **Next.** T2: persistent store.
+
+### 0023 — T2: run state survives a restart
+
+**What was built.** A `STORE=memory|firestore` setting, with `memory` as the
+default. `firestore` constructs `FirestoreStore` with ADC credentials only. An
+empty project id refuses at `create_app`. A read-only probe with a 10s timeout,
+run at startup, aborts the service if Firestore cannot be reached. It never
+falls back to memory.
+
+**Fix.** Timeline order in `FirestoreStore`: document ids are random, so turns
+and events with the same timestamp could come back reordered. A hidden
+write-order field now sorts them and is stripped on read.
+
+**Tests.** A test-only fake Firestore client enforces the real value and size
+rules, so the conformance suite always runs `FirestoreStore`. A restart test
+reads a completed PR run back through a second app and store over the same data,
+and a stranger still gets 404.
+
+**Review gate outcome.** `PASS` on round 1, from a Sonnet reviewer with a
+mutation check.
+
+**Open.** A patch document over 1 MiB cannot be stored. It is deferred, because
+demo patches are small. Production still permits `STORE=memory`.
+
+**Next.** T3: read routes for the journey.

@@ -39,6 +39,17 @@ class SecureExecutorKind(StrEnum):
     CONFIDENTIAL_SPACE = "confidential_space"
 
 
+class StoreKind(StrEnum):
+    """Where run state lives (T2).
+
+    `MEMORY` is lost on restart and exists for tests and throwaway development.
+    `FIRESTORE` persists runs, approvals, artifacts and events, and uses ADC.
+    """
+
+    MEMORY = "memory"
+    FIRESTORE = "firestore"
+
+
 class ConfigError(RuntimeError):
     """Raised when configuration is missing or invalid. Never caught to continue."""
 
@@ -85,6 +96,10 @@ class Settings(BaseSettings):
     github_app_client_id: str | None = None
     github_app_client_secret: str | None = None
     github_app_private_key_path: str | None = None
+
+    # Run state. `firestore` uses FIREBASE_PROJECT_ID's database with ADC and
+    # refuses to start without it; `memory` is lost on every restart.
+    store: StoreKind = StoreKind.MEMORY
 
     secure_executor: SecureExecutorKind = SecureExecutorKind.DEVELOPMENT
     workspace_root: str = "/tmp/mcpforge-workspaces"  # noqa: S108

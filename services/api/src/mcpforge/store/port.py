@@ -31,6 +31,12 @@ class NotFoundError(Exception):
     """
 
 
+class StoreUnavailableError(RuntimeError):
+    """The configured persistent store cannot be used: no credentials, or the
+    database cannot be reached. Raised at startup, never caught to continue on
+    a different store."""
+
+
 @runtime_checkable
 class Store(Protocol):
     # Projects
