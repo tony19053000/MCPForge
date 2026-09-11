@@ -417,6 +417,24 @@ class Pipeline:
             )
         return toolset, patch, plan, stored
 
+    async def read_patch(
+        self, session_id: str, owner: str
+    ) -> tuple[GeneratedPatch, Artifact] | None:
+        """The stored patch, rebuilt in full for display — ticket T3. Read-only.
+
+        The PATCH artifact holds only `GeneratedPatch.hashable()`, which has no
+        rationale. The full patch is rebuilt from the approved plan exactly as a
+        later stage does, and refused (`PipelineError`) if it no longer hashes
+        to the stored one — so what is shown is what an approval covers.
+
+        `None` when no patch has been generated. No transition, no event.
+        """
+        session = await self._store.get_session(session_id, owner)
+        if await self._store.get_artifact(session.id, ArtifactKind.PATCH, owner) is None:
+            return None
+        _, patch, _, stored = await self._approved_patch(session)
+        return patch, stored
+
     async def _installation_repository(
         self, full_name: str
     ) -> tuple[Repository, InstallationToken]:

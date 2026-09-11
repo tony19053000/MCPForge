@@ -1583,3 +1583,30 @@ mutation check.
 demo patches are small. Production still permits `STORE=memory`.
 
 **Next.** T3: read routes for the journey.
+
+### 0024 — T3: every stage's result is readable by its owner
+
+**What was built.** Five read-only GET routes under
+`/api/sessions/{id}/pipeline`: `/state` (the run state, pending gate and latest
+failure), `/patch` (in `DiffView`'s file shape, with a 409 if a rebuild no
+longer matches the stored hash), `/security-review` (the gate verdict, kept
+separate from the model's opinion), `/validation` (every check, plus readiness
+with reasons; pass/fail comes from the gate's own `outcome_of`) and
+`/pull-request` (only what the writer recorded). Workflows and the plan were
+already readable through the agent read routes.
+
+**Rules held.** A stranger gets the same 404 as an unknown session. A stage that
+has not run reads as `null`, and a failed stage reads as failed. Reads write
+nothing. Command excerpts and reasons are redacted.
+
+**Caught before review.** The coder added a public `redact_text` to
+`logging.py`. That file ships in the attested image, so the main session
+removed the addition, and the route imports the private `_redact_text`.
+
+**Review gate outcome.** `PASS` on round 1, from a Sonnet reviewer, with a
+mutation of `outcome_of` caught.
+
+**Open.** The pre-existing `GET /api/agent/sessions/{id}/validation` returns
+excerpts unredacted. That is a follow-up.
+
+**Next.** T4: frontend pipeline client.

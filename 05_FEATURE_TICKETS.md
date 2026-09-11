@@ -677,7 +677,7 @@ None may weaken a security rule. The project owner ordered this work on
 **Acceptance criteria.** Each stored stage result can be fetched by its owner, and only by its owner.
 **Tests.** Route tests, including a refusal for another user's session.
 **Security.** Reads never move a run, and no payload carries a secret.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS`, 2026-09-12. Follow-up found in review: the pre-existing `GET /api/agent/sessions/{id}/validation` returns stdout/stderr excerpts unredacted.
 
 ### T4 — Frontend pipeline client
 **Purpose.** UI actions call the real pipeline routes.
