@@ -1495,14 +1495,17 @@ def test_every_test_named_in_prose_actually_exists() -> None:
 
     defined = {
         node.name
-        for path in sorted((REPO_ROOT / "services" / "api" / "tests").glob("test_*.py"))
+        # `rglob`, not `glob`: F9-01 added `tests/integration/`, and a
+        # non-recursive search reported that directory's real tests as
+        # nonexistent. The search must cover every directory tests live in.
+        for path in sorted((REPO_ROOT / "services" / "api" / "tests").rglob("test_*.py"))
         for node in ast.walk(ast.parse(path.read_text()))
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name.startswith("test_")
     }
     assert len(defined) > 100, f"only {len(defined)} tests discovered — reading the wrong tree"
 
-    modules = {path.stem for path in (REPO_ROOT / "services" / "api" / "tests").glob("test_*.py")}
+    modules = {path.stem for path in (REPO_ROOT / "services" / "api" / "tests").rglob("test_*.py")}
 
     referenced: dict[str, str] = {}
     for path in PROSE_FILES:

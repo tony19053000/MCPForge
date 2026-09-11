@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from mcpforge.logging import get_logger
 from mcpforge.models.core import (
+    Approval,
     ApprovalGate,
     Origin,
     RunEvent,
@@ -116,6 +117,24 @@ class RunMachine:
         )
         return updated
 
+    async def check_approval(
+        self,
+        session: Session,
+        gate: ApprovalGate,
+        *,
+        for_state: RunState,
+        approval_id: str | None,
+        artifact_hash: str | None,
+    ) -> Approval:
+        """The same gate check, for a gate that guards an action rather than a
+        state entrance — `WORKFLOW_SELECTION` and `REPOSITORY_BINDING` (F9-01).
+
+        Deliberately the one implementation `transition` uses, so an approval
+        that would not open a gated state cannot open an action gate either.
+        Returns the stored record it checked.
+        """
+        return await self._require_approval(session, gate, for_state, approval_id, artifact_hash)
+
     async def _require_approval(
         self,
         session: Session,
@@ -123,7 +142,7 @@ class RunMachine:
         target: RunState,
         approval_id: str | None,
         artifact_hash: str | None,
-    ) -> None:
+    ) -> Approval:
         """The gate check. Loads the record from the store and nothing else.
 
         Four things must hold, and each has been a way in:
@@ -151,6 +170,7 @@ class RunMachine:
         # regenerated artifact invalidates the approval automatically.
         if not approval.covers(artifact_hash):
             raise ApprovalRequiredError(target, gate)
+        return approval
 
     @staticmethod
     def _label(state: RunState) -> str:

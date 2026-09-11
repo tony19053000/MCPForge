@@ -16,6 +16,7 @@ from mcpforge.api import (
     generation,
     health,
     me,
+    pipeline,
     projects,
     repos,
     trust,
@@ -28,6 +29,7 @@ from mcpforge.gemini.google_provider import GoogleGenAIProvider
 from mcpforge.gemini.provider import GeminiProvider
 from mcpforge.github.client import GitHubAppClient
 from mcpforge.logging import configure_logging, get_logger
+from mcpforge.orchestration.pipeline import PipelineOptions
 from mcpforge.store.memory import InMemoryStore
 from mcpforge.store.port import Store
 
@@ -63,15 +65,17 @@ def create_app(
     gemini: GeminiProvider | None = None,
     github: GitHubAppClient | None = None,
     executor: SecureExecutionProvider | None = None,
+    pipeline_options: PipelineOptions | None = None,
 ) -> FastAPI:
     """Build the application.
 
     `token_verifier` is injectable so tests exercise the real dependency chain
     with a locally signed key rather than mocking authentication away.
 
-    `executor` is left `None` by default because no route runs a repository job
-    yet. The trust panel reports that absence as an absence (`api/trust.py`);
-    it is not filled in with an assumed provider.
+    `executor` is left `None` by default. The pipeline routes (`api/pipeline.py`,
+    F9-01) are the only routes that run a repository job, and without a provider
+    they refuse with 503 rather than assuming one; the trust panel reports the
+    same absence (`api/trust.py`).
     """
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_output=settings.is_production)
@@ -101,6 +105,7 @@ def create_app(
 
         executor = build_executor(settings)
     app.state.executor = executor
+    app.state.pipeline_options = pipeline_options or PipelineOptions()
     app.state.github = github or GitHubAppClient(
         app_id=settings.github_app_id,
         private_key_path=settings.github_app_private_key_path,
@@ -121,6 +126,7 @@ def create_app(
     app.include_router(approvals.router)
     app.include_router(repos.router)
     app.include_router(generation.router)
+    app.include_router(pipeline.router)
     app.include_router(agent.router)
     app.include_router(trust.router)
     app.include_router(attestation.router)

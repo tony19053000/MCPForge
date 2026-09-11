@@ -58,6 +58,35 @@ def _params_of(node: Node, source: bytes) -> list[str]:
     return [n for n in names if n]
 
 
+def _object_params_of(node: Node, source: bytes) -> list[str]:
+    """The parameters declared as a single object rather than a positional value.
+
+    Two syntactic shapes count: an object-literal type annotation
+    (`params: { guests: number }`) and a destructuring pattern
+    (`{ guests }: Options`). A named type (`input: Options`) is not recognised —
+    resolving it needs type information this parser deliberately does not have,
+    so such a parameter reads as positional and a mismatch surfaces when the
+    generated code is typechecked rather than being guessed here.
+    """
+    params_node = node.child_by_field_name("parameters")
+    if params_node is None:
+        return []
+    found: list[str] = []
+    for child in params_node.named_children:
+        if child.type not in ("required_parameter", "optional_parameter"):
+            continue
+        pattern = child.child_by_field_name("pattern")
+        annotation = child.child_by_field_name("type")
+        annotated_object = annotation is not None and any(
+            c.type == "object_type" for c in annotation.named_children
+        )
+        destructured = pattern is not None and pattern.type == "object_pattern"
+        if annotated_object or destructured:
+            identifier = pattern if pattern is not None else child
+            found.append(_text(identifier, source).split(":")[0].strip())
+    return [n for n in found if n]
+
+
 def _looks_like_component(name: str, body: str) -> bool:
     """A React component is an exported function starting with a capital that
     returns JSX. Naming alone is not enough, so the body is checked for a tag."""
@@ -104,6 +133,7 @@ def parse_source(source_text: str, *, tsx: bool = True) -> ParsedFile:
                         exported=exported,
                         is_async="async" in body[: body.index("function") + 8],
                         params=_params_of(node, source),
+                        object_params=_object_params_of(node, source),
                     )
                 )
                 if exported:
@@ -164,9 +194,11 @@ def parse_source(source_text: str, *, tsx: bool = True) -> ParsedFile:
                         else SymbolKind.FUNCTION
                     )
                     params = _params_of(value_node, source) if value_node else []
+                    object_params = _object_params_of(value_node, source) if value_node else []
                 else:
                     kind = SymbolKind.CONST
                     params = []
+                    object_params = []
                 exported = _is_exported(node)
                 result.symbols.append(
                     Symbol(
@@ -177,6 +209,7 @@ def parse_source(source_text: str, *, tsx: bool = True) -> ParsedFile:
                         exported=exported,
                         is_async=body.lstrip().startswith("async") or " async " in body[:80],
                         params=params,
+                        object_params=object_params,
                     )
                 )
                 if exported:

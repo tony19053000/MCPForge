@@ -27,7 +27,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-None. Phase 8 is complete. Next is Phase 9 — Hardening, Demo and Launch (90% → 100%). Known carry-forwards: `F9-01` (approval-consuming stages; `F7-02`/`F7-03` are `DONE, PARTIALLY BLOCKED`), `F9-03` (Playwright E2E, still absent), `F6-05` (needs a public URL), and — new with `F8-02` — **running repository jobs inside the attested boundary**: the attested workload performs preflight and attestation only, and `ConfidentialSpaceSecureExecutor` refuses every job in every state.
+`F9-01` — end-to-end pipeline test. **Code side passed review (round 3) and is committed; the ticket stays `PENDING`** until both live legs pass. The analysis leg needs the owner's go-ahead to spend a live Gemini run. The PR leg also needs `tony19053000/mcpforge-test` seeded — by the owner, by hand — with the demo app and its lockfile. Other carry-forwards: `F6-05` (needs a public URL) and running repository jobs inside the attested boundary.
 
 ---
 
@@ -147,7 +147,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1560 passing** — 262 web (Vitest/RTL), 1298 API (pytest), 4 skipped (2 web, 2 API — the second API skip is the opt-in live check against Google's JWKS). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1623 passing** — 262 web (Vitest/RTL), 1361 API (pytest), 6 skipped (2 web; 4 API — the opt-in live JWKS check, one pre-existing, and the two F9-01 live legs, which run only under `MCPFORGE_E2E_LIVE=1`). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -1462,3 +1462,52 @@ not started.
 would move the trusted digest. The relying party as the only route to
 `HARDWARE_ATTESTED`. The API-issued nonce and the single-use run record. The
 production image family in `launch.sh`.
+
+---
+
+### 0020 — F9-01, code side: the pipeline runs as one system, and every gate still holds
+
+**Not a completion.** `F9-01` stays `PENDING` until both live legs pass.
+
+**What was built.** The orchestrator is connected to every stage for the first
+time — `orchestration/pipeline.py` and `api/pipeline.py`, one human-driven
+route per stage, each through `RunMachine.transition`. Artifacts persist when
+produced, so the agent read tools return real results; approved
+`WORKFLOW_SELECTION` and `REPOSITORY_BINDING` requests are consumed through the
+same approval check the machine uses; a gate re-reached after a rejection needs
+a fresh decision. An offline suite drives every transition in the state table
+with labelled stand-ins, and skipping each approval in turn fails. Live legs run
+only under `MCPFORGE_E2E_LIVE=1`, in a manual-only CI job.
+
+**Owner decisions, 2026-09-11.**
+1. **A separate, networked dependency-install step**
+   (`orchestration/dependencies.py`), amending `03_SECURITY_ACCESS.md` §3 as the
+   second networked operation after cloning: its own workspace holding only
+   `package.json` and `package-lock.json`; `npm ci --ignore-scripts` only; the
+   lockfile required and parsed so every package resolves to
+   `https://registry.npmjs.org/` with an integrity hash; evidence recorded;
+   validation itself stays network-denied. Stated bound: a package malicious as
+   published is installed; `--ignore-scripts` only stops it running during install.
+2. **Agent stage endpoints stay inert**, matching `02_ARCHITECTURE.md` §10.1.
+3. **`tony19053000/mcpforge-test` is seeded with the demo app plus a lockfile,
+   by the owner, by hand** — MCPForge never writes a default branch.
+
+**Review gate outcome.** `PASS` on the third round. Round 1 found a validation
+"pass" nothing backed — 2 checks run, 14 skipped, score 0, and a pull request
+opened on it — and a run that could strand in `VALIDATION_RUNNING`. Round 2
+found a **secret-exposure path**: `is_file()` follows a link, so a `package.json`
+pointing at a host file such as `.env` was copied into the networked install
+workspace; and the live CI step piped pytest into `tee` without `pipefail`, so a
+failing leg could leave the job green. All four fixed with tests proven to fail
+without them. A pass now requires every per-tool check to have run.
+
+**Facts worth keeping.** A pre-existing test,
+`test_the_clone_step_may_have_the_network`, makes a real outbound connection and
+flaked once; it predates this work. The prose checker searched `tests/`
+non-recursively and missed `tests/integration/`; it now uses `rglob`.
+
+**Not touched.** No file the attested workload image carries —
+`sha256:cebf7ea1…` still reproduces.
+
+**Next.** The owner's go-ahead for the live analysis leg, then the seed push and
+the live PR leg.

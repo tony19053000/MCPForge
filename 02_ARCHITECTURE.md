@@ -393,9 +393,26 @@ Both the human UI and the agent surface create approvals through one function, `
 
 Two gates were added for the agent surface: `REPOSITORY_BINDING` and `WORKFLOW_SELECTION`. A human does both directly in the UI, where the click is the decision; an agent can only request them. Neither appears in `GATED_TRANSITIONS` — they gate an action, not a state entrance.
 
-### 10.3 What is not yet wired
+### 10.3 The pipeline — `/api/sessions/{id}/pipeline` (F9-01)
 
-`start_repository_analysis`, `generate_patch`, `run_security_review` and `run_validation` record the request on the timeline and return `started: false`. The orchestrator does not yet act on them, and no stage persists an `ANALYSIS`, `TOOL_PLAN`, `SECURITY_REVIEW` or `VALIDATION` artifact, so the corresponding read tools report `available: false` against a real run. Returning `started: true` would be a hardcoded value that makes a check look passed. Wiring is tracked as **F9-01**.
+The orchestrator is connected to the stages in `orchestration/pipeline.py`, driven by the developer through `api/pipeline.py`. One route per stage — `connect`, `analysis`, `workflows`, `plan`, `patch`, `security-review`, `validation`, `pull-request/request`, `pull-request`, `reject` — and each does the same four things: refuse unless the session is in a state the stage may start from; move through `RunMachine.transition`, which checks every gate against a stored `Approval`; run the stage and persist its artifact at the point it is produced; move on, or record the failure and stay in the running state, whose retry self-loop is how the developer tries again.
+
+- **Artifacts.** `ANALYSIS` carries the analysis, the structural index (no file bodies) and the filter's `quarantined_paths`; `TOOL_PLAN` the reconciled plan and its risk discrepancies; `PATCH` exactly `GeneratedPatch.hashable()`; `SECURITY_REVIEW` the `GateVerdict`; `VALIDATION` the `ValidationReport`. The F7-02 read tools now answer from them. Generation is deterministic, so a later stage rebuilds the full patch from the approved plan and refuses if it no longer hashes to the stored `PATCH`.
+- **Plan to toolset.** `orchestration/toolset.py` binds each planned tool to its real declaration from the index — module specifier, async-ness, and whether the function takes one object or positional arguments (`Symbol.object_params`, recorded by the parser). A plan that cannot be bound is refused at planning, before a human is asked to approve it, and nothing reshapes an approved plan to fit.
+- **Consumed approvals.** An agent's `WORKFLOW_SELECTION` and `REPOSITORY_BINDING` requests are consumed by `workflows` and `connect`, checked by `RunMachine.check_approval` — the same implementation `transition` uses. `REPOSITORY_BINDING` resolves the repository through the App installation and binds without ever rebinding.
+- **A gate reached again needs a new decision.** An approval requested before the run last arrived at its pending state is refused (`ApprovalNotCurrentError`), so a rejection cannot be undone by re-presenting the approval given before it.
+- **No module both reaches Gemini and touches the score.** The pipeline constructs agents 1, 2 and 4, so validation runs in `orchestration/validation_run.py`, which holds the validator and its report and cannot reach a model; the pipeline receives only the verdict, a summary and the serialized report (`test_no_module_both_prompts_gemini_and_touches_the_score`).
+- **A validation pass must be backed.** `ValidationReport.passed` only says the checks that ran passed. A pipeline pass also requires every tool check — registration, schema, execution or authorization, error handling — to have executed, the one permitted skip being error handling for a tool with no inputs (`validation_run.unexecuted_tool_checks`). Otherwise the run goes to `VALIDATION_FAILED` with the cause "Could not validate", and no pull request can follow. Every precondition of `validate` and `review` is checked before their first transition, and any failure after entering `VALIDATION_RUNNING` becomes `VALIDATION_FAILED`, because neither running state has a retry self-loop.
+- **Gates are opened, never decided, here.** A stage that reaches a gate returns a `GateRequest`; the router opens it through `open_gate_request`, bound to the stored artifact's hash.
+- **A demo run stops at `VALIDATION_PASSED`.** `pull-request/request` applies the writer's own `assert_within_boundary` / `assert_may_write` before any transition, and the writer refuses a demo project again if handed one.
+- **The writer is not routed around.** It receives the base branch's head as GitHub reports it at write time, so its "the base moved after approval" refusal compares real state.
+
+**What is still not wired, and why.**
+
+- **The agent stage endpoints, by decision.** `start_repository_analysis`, `generate_patch`, `run_security_review` and `run_validation` on `/api/agent` record the request and return `started: false`, and stay that way: the project owner decided on 2026-09-11 that only human-driven routes move a run, as §10.1 property 2 already holds (`test_no_agent_endpoint_transitions_the_session`).
+- **No provider by default.** `create_app` attaches no execution provider (§10.4), so in the running service every pipeline stage that needs a workspace answers 503 rather than assuming one. Tests and the live legs attach `DevelopmentSecureExecutor` explicitly.
+- **Dependencies for a connected repository come from a separate install step** (`orchestration/dependencies.py`, the owner's decision of 2026-09-11). Validation commands still have no network. Before them, `npm ci --ignore-scripts --registry=https://registry.npmjs.org/` runs in its own networked workspace holding only `package.json` and `package-lock.json`, after the lockfile has been parsed and every package checked to resolve from that registry with an integrity hash; its `node_modules` is copied into the network-denied validation workspace. No lockfile, a foreign `resolved` host or a failed install ends the run at `VALIDATION_FAILED` as "could not validate". The report's `dependencies` field records the source — `install-step` with the lockfile SHA-256, package count, argument array and exit code, or `demo-fixture` for the bundled app, which uses this repository's own `node_modules`. A repository's committed `node_modules` is never used. The rules are in `03_SECURITY_ACCESS.md` §3.
+- **Stages run inline in the request.** Validation takes minutes. Timeouts, cancellation and backpressure are `F9-02`.
 
 ### 10.4 The trust panel — `/api/sessions/{id}/trust`
 
@@ -421,14 +438,16 @@ Three deliberate absences:
   the browser; a server answer would be a guess. The panel's adapter row is fed
   the `WebMCPState` the real adapter produced.
 - **No execution provider is attached by default.** `create_app` takes one and
-  stores it on `app.state.executor`, defaulting to `None` because no route runs
-  a repository job yet (§10.3). The row reports that absence as
+  stores it on `app.state.executor`, defaulting to `None`. The pipeline routes
+  (§10.3) are the only routes that run a repository job, and without a provider
+  they refuse with 503. The row reports that absence as
   `provider_running: false` rather than implying a provider that is not there.
 
-Because no stage persists an `ANALYSIS` artifact yet (§10.3), the filtering row
-in the running product currently reads "Active · nothing analyzed yet". The
-count is `null` rather than `0` until an analysis has actually run: zero would
-read as "scanned and clean" for a scan that never happened. The wiring is
+Until a session's analysis stage has run (§10.3), the filtering row reads
+"Active · nothing analyzed yet". The count is `null` rather than `0` until an
+analysis has actually run: zero would read as "scanned and clean" for a scan
+that never happened. Once it has run, the count is the `ANALYSIS` artifact's
+`quarantined_paths`, written by the pipeline from the filter's own record. The wiring is
 exercised end to end by
 `test_the_quarantine_count_is_the_filter_pipelines_own_record`, which runs the
 real `filter_tree` over a fixture with planted credentials and compares the

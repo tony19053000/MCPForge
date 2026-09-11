@@ -1,0 +1,93 @@
+name: Live end-to-end (F9-01)
+
+# Manual only. A full run calls Gemini several times and, for the PR leg,
+# opens a real pull request on the test repository — so it runs when someone
+# asks for it, never on a push.
+on:
+  workflow_dispatch:
+    inputs:
+      leg:
+        description: Which live leg to run
+        type: choice
+        options: [analysis, pr, both]
+        default: analysis
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: Live legs (${{ inputs.leg }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # Validation runs the real generated patch against the real demo fixture
+      # in the real sandbox, which needs the dependency tree and a node binary
+      # on the sandbox PATH — the same setup as ci.yml's validation job.
+      - run: npm ci
+        working-directory: .
+      - name: node must be reachable on the sandbox PATH
+        working-directory: .
+        run: |
+          if [ ! -x /usr/bin/node ]; then sudo ln -s "$(command -v node)" /usr/bin/node; fi
+          if [ ! -x /usr/bin/npm ]; then sudo ln -s "$(command -v npm)" /usr/bin/npm; fi
+          /usr/bin/node --version
+      - run: uv sync --frozen
+
+      - name: Write the GitHub App private key (PR leg only)
+        if: inputs.leg != 'analysis'
+        env:
+          APP_PRIVATE_KEY: ${{ secrets.MCPFORGE_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          key="$RUNNER_TEMP/mcpforge-github-app.pem"
+          umask 077
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$key"
+          echo "GITHUB_APP_PRIVATE_KEY_PATH=$key" >> "$GITHUB_ENV"
+
+      - name: Select the legs
+        run: |
+          case "${{ inputs.leg }}" in
+            analysis) echo "LEGS=analysis_leg" >> "$GITHUB_ENV" ;;
+            pr)       echo "LEGS=pr_leg" >> "$GITHUB_ENV" ;;
+            both)     echo "LEGS=analysis_leg or pr_leg" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Run the live legs
+        # `shell: bash` makes GitHub run this with `-eo pipefail`. Without it the
+        # step's status was `tee`'s, so a failing leg could leave the job green
+        # (F9-01 review, round 2). `set -o pipefail` below states it again.
+        shell: bash
+        env:
+          MCPFORGE_E2E_LIVE: "1"
+          # Required: a leg that cannot run fails here rather than skipping.
+          MCPFORGE_E2E_LIVE_REQUIRED: "1"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GITHUB_APP_ID: ${{ secrets.MCPFORGE_GITHUB_APP_ID }}
+        run: |
+          set -o pipefail
+          uv run pytest tests/integration/test_e2e_live.py -k "live and ($LEGS)" \
+            -rs -s --no-header | tee /tmp/e2e-live.txt
+          if grep -qiE '[0-9]+ skipped' /tmp/e2e-live.txt; then
+            echo "::error::a live leg skipped while it was required"
+            exit 1
+          fi
+
+      - name: Remove the private key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/mcpforge-github-app.pem"

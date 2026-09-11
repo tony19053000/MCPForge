@@ -211,6 +211,19 @@ class GitHubAppClient:
             private=item["private"],
         )
 
+    async def get_branch_head(self, token: InstallationToken, full_name: str, branch: str) -> str:
+        """The commit a branch points at right now, read from GitHub.
+
+        Used to hand the writer the *current* base, so its "the base moved after
+        approval" refusal compares against GitHub's state rather than against the
+        patch's own record of itself.
+        """
+        response = await self._get(f"/repos/{full_name}/git/ref/heads/{branch}", token.token)
+        sha = response.json().get("object", {}).get("sha")
+        if not isinstance(sha, str) or not sha:
+            raise GitHubError(f"GET branch head for {full_name}@{branch} returned no commit")
+        return sha
+
     async def aclose(self) -> None:
         if self._http is not None:
             await self._http.aclose()

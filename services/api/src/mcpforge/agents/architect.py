@@ -21,6 +21,7 @@ from mcpforge.gemini.provider import TraceContext
 from mcpforge.models.analysis import CodebaseAnalysis, RiskClass, Workflow
 from mcpforge.models.index import RepositoryIndex
 from mcpforge.models.toolplan import ProposedToolPlan, ToolPlan, ToolPlanEntry
+from mcpforge.orchestration.toolset import ToolsetConversionError, toolset_from_plan
 
 SYSTEM_INSTRUCTION = """
 You are the MCPForge Workflow Architect.
@@ -33,6 +34,10 @@ Rules:
   `cancel_reservation`. Never UI mechanics like `click_button` or `submit_form`.
 - `maps_to_function` must be the existing function that already implements the
   workflow. Generated code will call it. Never invent a new one.
+- A tool must be callable against its function exactly as declared. If the
+  function takes positional arguments, the tool's parameters are exactly the
+  function's own parameter names, spelled the same way. If it takes one object
+  (shown as `name: {...}`), the tool's parameters are that object's properties.
 - Parameters are the business inputs a caller needs. Never accept a table name,
   a file path, a URL, a SQL fragment, a user id, a role, a permission, or a
   token: the application already knows who the caller is, and a tool that takes
@@ -144,9 +149,10 @@ class WorkflowArchitect(Agent[ArchitectInput, ProposedToolPlan]):
         for file in payload.index.services:
             for symbol in file.symbols:
                 if symbol.exported and symbol.kind.value == "function":
-                    lines.append(
-                        f"  {symbol.name}({', '.join(symbol.params)})  [{file.path}:{symbol.line}]"
+                    params = ", ".join(
+                        f"{p}: {{...}}" if p in symbol.object_params else p for p in symbol.params
                     )
+                    lines.append(f"  {symbol.name}({params})  [{file.path}:{symbol.line}]")
         return "\n".join(lines)
 
     def verify(self, output: ProposedToolPlan, payload: ArchitectInput) -> None:
@@ -189,6 +195,17 @@ class WorkflowArchitect(Agent[ArchitectInput, ProposedToolPlan]):
                     problems.append(
                         f"tool '{tool.name}' cites {evidence.path}, which is not in the index"
                     )
+
+        if not problems:
+            # The same binding the generator will need, checked here so an
+            # unbindable plan costs the model a retry rather than failing the
+            # stage — found by the first live F9-01 run, where the model named
+            # `checkAvailability`'s inputs in snake_case. One implementation:
+            # this calls the conversion the pipeline itself uses.
+            try:
+                toolset_from_plan(reconcile_risk(output.to_plan())[0], index)
+            except ToolsetConversionError as exc:
+                problems.append(str(exc))
 
         if problems:
             raise AgentEvidenceError("Tool plan rejected: " + "; ".join(problems[:5]))

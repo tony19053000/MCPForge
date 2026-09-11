@@ -44,6 +44,12 @@ class Symbol(BaseModel):
     is_async: bool = False
     #: Parameter names only. Enough to design a tool schema, not enough to leak logic.
     params: list[str] = Field(default_factory=list)
+    #: The subset of `params` declared with an object-literal type or as a
+    #: destructuring pattern — `searchRooms(params: { guests: number })`. Syntax
+    #: only, from the declaration: it is what tells a single-object call
+    #: (`fn({ a, b })`) apart from a positional one (`fn(a, b)`) without a model
+    #: guessing. See `orchestration/toolset.py`.
+    object_params: list[str] = Field(default_factory=list)
 
 
 class CallSite(BaseModel):
