@@ -25,7 +25,7 @@ from mcpforge.models.index import (
     TypedField,
     TypedParameter,
 )
-from mcpforge.models.toolplan import ToolParameter, ToolPlan, ToolPlanEntry
+from mcpforge.models.toolplan import PLAIN_IDENTIFIER, ToolParameter, ToolPlan, ToolPlanEntry
 from mcpforge.models.webmcp import (
     CallStyle,
     SourceBinding,
@@ -87,6 +87,21 @@ JSON_TO_TS: dict[str, TsType] = {
 }
 
 
+#: Stands in for a parameter name that is not a plain identifier.
+NAME_WITHHELD = "(name withheld: not a plain identifier)"
+
+
+def _input_name(prop: ToolParameter) -> str:
+    """A tool input's name, quoted, for a recorded unchecked-type sentence.
+
+    The name was chosen by the model (`ToolParameter.name` has a length limit
+    and no pattern), and these sentences are stored and rendered in the pull
+    request body. A name that is not a plain identifier is withheld here, where
+    the sentence is built, so no reader of the stored artifact receives it.
+    """
+    return repr(prop.name) if PLAIN_IDENTIFIER.match(prop.name) else NAME_WITHHELD
+
+
 def _describe(slot: TypedParameter | TypedField) -> str:
     return f"{slot.name}{'?' if slot.optional else ''}: {slot.ts_type.value}"
 
@@ -107,7 +122,7 @@ def _check_slot(
     if slot.ts_type is TsType.UNKNOWN:
         unchecked.append(
             f"{where} has a type MCPForge cannot read from syntax alone, so the "
-            f"{prop.json_type} input {prop.name!r} was not type-checked against it"
+            f"{prop.json_type} input {_input_name(prop)} was not type-checked against it"
         )
         return
     if slot.ts_type is TsType.ANY:
@@ -123,7 +138,7 @@ def _check_slot(
     if slot.ts_type in (TsType.ARRAY, TsType.OBJECT):
         detail = "element type" if slot.ts_type is TsType.ARRAY else "shape"
         unchecked.append(
-            f"{where} is an {slot.ts_type.value}; its kind matches {prop.name!r}, "
+            f"{where} is an {slot.ts_type.value}; its kind matches {_input_name(prop)}, "
             f"but its {detail} was not checked"
         )
     if not slot.optional and not prop.required:

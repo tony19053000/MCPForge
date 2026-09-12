@@ -6,11 +6,19 @@ generated until a human has seen this and said yes.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from mcpforge.models.analysis import Evidence, RiskClass
+
+#: A model-chosen identifier (parameter, function, workflow or rule name) that is
+#: safe to quote in text a person reads: no whitespace, markup, backtick, quote
+#: or `|`, so it can be neither prose nor a way out of a table cell. Anything
+#: else is withheld rather than escaped. Used by `orchestration/toolset.py` and
+#: `github/pr_description.py`, so both apply the same check.
+PLAIN_IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$.:/-]{0,79}$")
 
 #: Tool names are snake_case verbs at the level of intent — `search_hotels`,
 #: never `click_button`. Enforced, because the naming *is* the product value.

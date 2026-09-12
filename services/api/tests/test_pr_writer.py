@@ -746,8 +746,10 @@ async def test_the_pull_request_body_is_built_from_the_plan_and_patch(
     # What stops for the developer.
     assert "What stops for you" in body
     assert "an AI agent cannot complete them without a person deciding" in body
-    # No claim about validation that did not run.
-    assert "## Validation" not in body
+    # No claim about validation that did not run: with no stored validation
+    # artifact the section says so and is not a pass (T6).
+    assert "**Result: NOT PASSED.** No validation is recorded" in body
+    assert "**Result: PASSED" not in body
 
 
 async def test_a_credential_in_the_pull_request_body_blocks_the_write(
@@ -785,6 +787,51 @@ async def test_a_credential_in_the_pull_request_body_blocks_the_write(
             session_id=SESSION,
         )
     assert calls == [], "the writer contacted GitHub before scanning the body"
+
+
+async def test_a_credential_split_by_markdown_escaping_still_blocks_the_write(
+    project: Project, patch: Any, plan: ToolPlan, token: InstallationToken
+) -> None:
+    """T6 escapes model strings in the body, which turns `xoxb-…` into
+    `xoxb\\-…` — past the scanner. The raw strings are scanned too, so the
+    write is still refused rather than the credential leaving escaped.
+    """
+    from mcpforge.github.pr_description import describe_patch
+    from mcpforge.security.filters import scan_content
+
+    leaked = "xoxb" + "-1234567890-abcdefghij"
+    tainted = plan.model_copy(
+        update={
+            "tools": [
+                plan.tools[0].model_copy(update={"description": f"Use {leaked} to search"}),
+                plan.tools[1],
+            ]
+        }
+    )
+    # Precondition: escaping alone really does hide it from the body scan.
+    body = describe_patch(tainted, patch, branch=branch_name_for("booking"), base_commit="b")
+    assert not [h for h in scan_content(body) if h.rule == "slack token"]
+
+    transport, calls = _transport(None)
+    writer = BranchAndPullRequestWriter(
+        token=token,
+        http=httpx.AsyncClient(transport=transport),
+        base_url="https://api.github.test",
+    )
+    with pytest.raises(WriteRefusedError, match="slack token"):
+        await writer.create_pull_request(
+            project=project,
+            repository_full_name=REPO,
+            default_branch="main",
+            base_commit="basesha",
+            branch=branch_name_for("booking"),
+            patch=patch,
+            plan=tainted,
+            patch_approval=approval(ApprovalGate.PATCH, patch),
+            pr_approval=approval(ApprovalGate.PULL_REQUEST, patch),
+            session_id=SESSION,
+        )
+    assert calls == []
 
 
 # -- the base commit is bound to the approval — F6-02 ----------------------

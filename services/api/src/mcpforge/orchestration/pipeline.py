@@ -76,6 +76,7 @@ from mcpforge.github.client import (
     InstallationToken,
     Repository,
 )
+from mcpforge.github.pr_description import PullRequestContext
 from mcpforge.github.writer import BranchAndPullRequestWriter, PullRequest, WriteRefusedError
 from mcpforge.indexing.indexer import build_index
 from mcpforge.indexing.retrieval import (
@@ -980,6 +981,7 @@ class Pipeline:
                         "validated": False,
                         "reason": failure,
                         "dependencies": dependencies,
+                        "trust_level": executor.trust_level.value,
                     },
                 )
             )
@@ -992,7 +994,13 @@ class Pipeline:
                 session_id=session.id,
                 project_id=session.project_id,
                 kind=ArtifactKind.VALIDATION,
-                payload={**outcome.payload, "dependencies": dependencies},
+                payload={
+                    **outcome.payload,
+                    "dependencies": dependencies,
+                    # What the executor reported for this run. The PR states it,
+                    # and states DEVELOPMENT_ISOLATION when it is absent.
+                    "trust_level": executor.trust_level.value,
+                },
             )
         )
         if outcome.passed:
@@ -1110,6 +1118,31 @@ class Pipeline:
             ),
         )
 
+    async def _pull_request_context(self, session: Session) -> PullRequestContext:
+        """The stored artifacts the PR description is built from — ticket T6.
+
+        Passed as raw payloads: this module reaches Gemini, so it never holds a
+        validation report or score (`test_no_module_both_prompts_gemini_and_touches_the_score`).
+        A missing artifact stays `None` and is rendered as missing, not passed.
+        """
+        owner = session.owner_uid
+        analysis, _, _ = await self._analysis(session)
+        selection = await self._store.get_artifact(
+            session.id, ArtifactKind.WORKFLOW_SELECTION, owner
+        )
+        raw_ids = selection.payload.get("workflow_ids") if selection is not None else None
+        selected = set(raw_ids) if isinstance(raw_ids, list) else set()
+        plan_artifact = await self._artifact(session, ArtifactKind.TOOL_PLAN)
+        unchecked = plan_artifact.payload.get("types_not_checked")
+        review = await self._store.get_artifact(session.id, ArtifactKind.SECURITY_REVIEW, owner)
+        validation = await self._store.get_artifact(session.id, ArtifactKind.VALIDATION, owner)
+        return PullRequestContext(
+            workflows=[w for w in analysis.workflows if w.id in selected],
+            security_review=review.payload if review is not None else None,
+            validation=validation.payload if validation is not None else None,
+            types_not_checked=unchecked if isinstance(unchecked, dict) else {},
+        )
+
     async def create_pull_request(
         self, session_id: str, owner: str, actor: Actor, *, approval_id: str | None = None
     ) -> StepResult:
@@ -1176,6 +1209,7 @@ class Pipeline:
                 patch_approval=patch_approval,
                 pr_approval=pr_approval,
                 session_id=session.id,
+                context=await self._pull_request_context(session),
             )
         except (WriteRefusedError, BoundaryError, AccessModeError) as exc:
             raise await self._fail(session, "Opening the pull request", exc) from exc

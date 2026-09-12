@@ -31,7 +31,12 @@ from mcpforge.github.branches import (
     PROTECTED_NAMES,
 )
 from mcpforge.github.client import ACCEPT, GitHubError, InstallationToken
-from mcpforge.github.pr_description import default_title, describe_patch
+from mcpforge.github.pr_description import (
+    PullRequestContext,
+    default_title,
+    describe_patch,
+    untrusted_text,
+)
 from mcpforge.logging import get_logger
 from mcpforge.models.core import (
     Approval,
@@ -206,6 +211,7 @@ class BranchAndPullRequestWriter:
         session_id: str,
         title: str | None = None,
         body: str | None = None,
+        context: PullRequestContext | None = None,
     ) -> WriteOutcome:
         """Create the branch, commit the patch, open the pull request.
 
@@ -233,8 +239,13 @@ class BranchAndPullRequestWriter:
         # caller, and scanned before it leaves — §4.4 requires the outbound scan
         # again before pull-request creation, and the body is outbound content.
         pr_title = title or default_title(plan)
-        pr_body = body or describe_patch(plan, patch, branch=branch, base_commit=base_commit)
-        for label, text in (("title", pr_title), ("body", pr_body)):
+        pr_body = body or describe_patch(
+            plan, patch, branch=branch, base_commit=base_commit, context=context
+        )
+        # The body escapes model strings, which can split a credential past the
+        # scanner; their raw form is scanned too (T6).
+        raw = untrusted_text(plan, patch, context)
+        for label, text in (("title", pr_title), ("body", pr_body), ("body", raw)):
             hits = scan_content(text)
             if hits:
                 raise WriteRefusedError(

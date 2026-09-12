@@ -717,7 +717,7 @@ None may weaken a security rule. The project owner ordered this work on
 **Acceptance criteria.** Every section is present and comes from a stored artifact.
 **Tests.** A unit test per section; a failed security result is never rendered as passed.
 **Security.** No secret or model text appears in the PR body.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS` on round 3, 2026-09-12. Built ahead of T5b: the renderer is backend-only and needs nothing from the UI.
 
 ### T7 — Live end-to-end on `mcpforge-test`
 **Purpose.** Prove the journey works for a real developer.

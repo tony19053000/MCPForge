@@ -60,7 +60,7 @@ from mcpforge.models.index import (
 )
 from mcpforge.models.toolplan import ToolPlan
 from mcpforge.models.webmcp import WebMCPTool, WebMCPToolset
-from mcpforge.orchestration.toolset import ToolsetConversionError, toolset_from_plan
+from mcpforge.orchestration.toolset import ToolsetConversionError, _check_slot, toolset_from_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEMO = REPO_ROOT / "fixtures" / "demo-hotel-app"
@@ -396,6 +396,45 @@ def test_an_unknown_type_still_needs_its_required_field_present() -> None:
 def test_a_named_parameter_type_is_recorded_as_not_checked() -> None:
     (tool,) = bind(_unreadable_index(), _orders_tool("orderFor", _param("ref", "string"))).tools
     assert any("orderFor(ref)" in note for note in tool.source.unchecked)
+    assert any("input 'ref' was not type-checked" in note for note in tool.source.unchecked)
+
+
+HOSTILE_NAME = "x' @all <b>|</b> [a](http://e.test)"
+
+
+def test_a_hostile_parameter_name_is_withheld_from_unchecked_notes() -> None:
+    """The name is the model's (`ToolParameter.name` has no pattern) and the notes
+    are stored and rendered in the pull request body, so it is withheld where the
+    note is built.
+
+    Today such a name never reaches a stored note: `SourceBinding` and
+    `ToolInputProperty` both refuse it (next test). The sentence builder is
+    exercised directly so the note is safe on its own, not only because a later
+    validator happens to reject the whole tool.
+    """
+    found = _unreadable_index().find_symbol("orderFor")
+    assert found is not None
+    _, symbol = found
+    (slot,) = symbol.signature
+    assert slot.ts_type is TsType.UNKNOWN, "the slot is readable; no note would be written"
+    plan = ToolPlan.model_validate(
+        {"tools": [_orders_tool("orderFor", _param(HOSTILE_NAME, "string"))]}
+    )
+    tool = plan.tools[0]
+    problems: list[str] = []
+    unchecked: list[str] = []
+    _check_slot(tool, "orderFor(ref)", slot, tool.parameters[0], problems, unchecked)
+    assert not problems
+    assert unchecked, "nothing was recorded; the test checks nothing"
+    notes = " ".join(unchecked)
+    assert "(name withheld: not a plain identifier)" in notes
+    for fragment in ("@all", "<b>", "|", "e.test", "x'"):
+        assert fragment not in notes
+
+
+def test_a_hostile_parameter_name_is_refused_by_the_toolset() -> None:
+    with pytest.raises(ToolsetConversionError, match="not a valid TypeScript identifier"):
+        bind(_unreadable_index(), _orders_tool("orderFor", _param(HOSTILE_NAME, "string")))
 
 
 def test_an_index_without_types_checks_nothing_and_says_so() -> None:

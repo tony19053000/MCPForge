@@ -27,6 +27,8 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
+`T5b` — Journey UI: generation to pull request. T0–T5a and T6 are `DONE`; T7 (live end-to-end on `mcpforge-test`) follows T5b.
+
 `F9-01` — end-to-end pipeline test. **Code side passed review (round 3) and is committed; the ticket stays `PENDING`** until both live legs pass. The analysis leg needs the owner's go-ahead to spend a live Gemini run. The PR leg also needs `tony19053000/mcpforge-test` seeded — by the owner, by hand — with the demo app and its lockfile. Other carry-forwards: `F6-05` (needs a public URL) and running repository jobs inside the attested boundary.
 
 ---
@@ -85,6 +87,13 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 | F8-04 | Agent 5: Validator and Agent Readiness Score | PASS (round 3) |
 | F8-05 | Before/after demonstration | PASS (round 3) |
 | F8-02 | ConfidentialSpaceSecureExecutor | PASS (code review round 2) and a real run, `cs-20260910-234427-b3b40d`, verified by the API to `HARDWARE_ATTESTED` on 2026-09-11 |
+| T0 | Generated-code type binding | PASS (round 2) |
+| T1 | Runtime executor | PASS (round 1) |
+| T2 | Persistent run state | PASS (round 1) |
+| T3 | Read routes for the journey | PASS (round 1) |
+| T4 | Frontend pipeline client | PASS (round 1) |
+| T5a | Journey UI: analysis to plan approval | PASS (round 1) |
+| T6 | Pull request description | PASS (round 3) — built ahead of T5b |
 
 ## In progress
 
@@ -92,7 +101,7 @@ None.
 
 ## Pending
 
-Phases 8–9, tickets `F8-01` through `F9-05`, plus `F6-05` (GitHub webhook, needs a public URL). See `05_FEATURE_TICKETS.md`.
+Phase 9 tickets `F9-01` through `F9-05`, T-track tickets `T5b` and `T7`–`T9`, plus `F6-05` (GitHub webhook, needs a public URL). See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -147,7 +156,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1623 passing** — 262 web (Vitest/RTL), 1361 API (pytest), 6 skipped (2 web; 4 API — the opt-in live JWKS check, one pre-existing, and the two F9-01 live legs, which run only under `MCPFORGE_E2E_LIVE=1`). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1819 passing** (as of T6, 2026-09-12) — 312 web (Vitest/RTL), 1507 API (pytest), 6 skipped (2 web; 4 API — the opt-in live JWKS check, one pre-existing, and the two F9-01 live legs, which run only under `MCPFORGE_E2E_LIVE=1`). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -187,7 +196,9 @@ because the log records what was true at the time.
 
 ## Latest Git commit
 
-`fd9209b` — `feat(F7): close Phase 7 at 80% after reviewer PASS on round 10`
+`d42bfda` — `feat(T5a): the journey from connect to plan approval, in the UI`. The T6 commit follows it; its hash is recorded at the next update, not back-filled by amending.
+
+Previously recorded here: `fd9209b` — `feat(F7): close Phase 7 at 80% after reviewer PASS on round 10`. Phase 8 and the T-track (T0–T5a) came after it; each has a Context State Log entry.
 
 **Correction.** This line previously read `41dad3c`. That is a real commit object — `docs: close Phase 6 at 70% after reviewer PASS` — but it was superseded when that commit was amended into `d9497c4`, leaving it unreachable from `main` (`git merge-base --is-ancestor 41dad3c main` fails). STATUS recorded the pre-amend hash.
 
@@ -1649,3 +1660,69 @@ a stored approval, and consuming it belongs to T5b.
 mutations were caught: forcing every stage to "done", and deciding on mount.
 
 **Next.** T6, which is in parallel, then T5b.
+
+### 0027 — T6: the pull request says what MCPForge did, and nothing the model wrote
+
+**What was built.** `github/pr_description.py` renders the PR body
+deterministically from stored records: workflows mapped (by id and risk), the
+security-review verdict and each finding (severity, rule id, source), the
+validation result, the readiness score with its components, warnings, the trust
+level, and testing instructions that name the commands MCPForge actually ran,
+or a labelled suggestion when none were recorded. `pipeline.py` loads those
+records and passes them to the writer; the validation payload now carries its
+`trust_level`. A missing, incomplete or unreadable review or validation record
+renders as `NOT PASSED`, never as passed; the trust level falls back to
+`DEVELOPMENT_ISOLATION`.
+
+**Decisions.**
+- The ticket's "no model text in the PR body" is enforced as written, not
+  narrowed to "escaped model text". Finding summaries and recommendations,
+  workflow names and descriptions, tool titles and descriptions, and file
+  rationales are not rendered. Tool descriptions had been in the body before
+  T6; they are gone too. Model-chosen identifiers (workflow id, rule id,
+  function and parameter names) render only if they match `PLAIN_IDENTIFIER`
+  (now in `models/toolplan.py`), otherwise as "identifier withheld".
+- Table cells neutralise `|` and newlines: GitHub splits rows on `|` even inside
+  code spans, so a hostile workflow id could otherwise put live HTML or links in
+  the body. `Workflow.id` is in the writer's credential scan.
+- Finding provenance is set by the gate, not trusted from the model.
+  `Finding.deterministic` is part of the schema the model answers in;
+  `evaluate_gate` now forces it to `False` on every model finding, so only the
+  policy engine's findings are labelled "(policy engine)". Pass/fail is
+  unchanged, since it comes from severity alone.
+- `toolset.py` withholds non-identifier parameter names from unchecked-type
+  notes. Upstream `TS_IDENTIFIER` already refuses such names, so this is
+  defence in depth.
+- Built ahead of T5b. The ticket listed T5b as a dependency, but the renderer is
+  backend-only and needs nothing from the UI.
+
+**Files.** `github/pr_description.py`, `github/writer.py`,
+`orchestration/pipeline.py`, `orchestration/toolset.py`,
+`agents/security_reviewer.py`, `models/toolplan.py`; tests
+`test_pr_description.py` (new), `test_pr_writer.py`,
+`test_security_and_interaction.py`, `test_binding_types.py`,
+`integration/test_pipeline_reads.py`, which captures the body actually sent to
+the fake GitHub and checks each section against the stored records, including a
+run with no validation record.
+
+**Review gate outcome.** `PASS` on round 3. Round 1 (5 findings): model text in
+the body, a table-breaking workflow id, no test on the body sent to GitHub, and
+two tests that could not fail. Round 2 (1 finding): the model could label its
+own finding "(policy engine)". Round 3 caught every mutation tried: the gate
+keeping the model's flag, the raw parameter name restored, and a finding
+summary rendered.
+
+**Open.** Security verdicts stored before this fix could hold a model finding
+with `deterministic=True`, which would render as "(policy engine)" if that run
+were resumed and its PR opened now. Only a development store holds runs today,
+and no released PR body has shown findings, so this is not blocking. Before any
+non-development store holds runs spanning this change, either recompute
+`policy_findings(plan, patch)` at render time and label "policy engine" only on
+a match, or version the stored verdict and render old ones as "source not
+recorded". Do **not** derive provenance from known rule ids: a model can reuse
+a policy rule id.
+
+**Do not touch.** The `deterministic=False` forcing in `evaluate_gate`, and the
+cell renderers' `|` handling.
+
+**Next.** T5b: the journey UI from generation to pull request.

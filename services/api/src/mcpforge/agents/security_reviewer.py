@@ -91,9 +91,16 @@ def evaluate_gate(
     The orchestrator reads this, never the agent's `advisory_pass`. When a patch
     is supplied the patch rules run too, so the same gate covers both the plan a
     human approved and the code that plan produced.
+
+    Provenance is established here, not trusted from the model. `Finding` is
+    part of the schema the reviewer answers in, so a model can set
+    `deterministic=True` on its own finding. Every finding from the report is
+    therefore forced to `deterministic=False`; only `policy_findings` can carry
+    `True` out of the gate. Severity is untouched, so `passed` is unaffected.
     """
     deterministic = policy_findings(plan, patch)
-    combined = [*deterministic, *report.findings]
+    from_model = [f.model_copy(update={"deterministic": False}) for f in report.findings]
+    combined = [*deterministic, *from_model]
     blocking = [f for f in combined if f.severity.blocks]
     passed = not blocking
 

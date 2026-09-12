@@ -129,6 +129,27 @@ def test_a_clean_plan_with_an_agent_pass_opens_the_gate() -> None:
     assert verdict.overridden is False
 
 
+def test_a_model_finding_cannot_claim_to_be_deterministic() -> None:
+    """Provenance is set by the gate. `deterministic` is in the schema the model
+    answers in, so a model can set it; only policy findings may keep it."""
+    spoof = {**HIGH_FINDING, "rule": "model.spoof", "severity": "LOW", "deterministic": True}
+    verdict = evaluate_gate(report(advisory_pass=True, findings=[spoof]), plan())
+    (from_model,) = [f for f in verdict.findings if f.rule == "model.spoof"]
+    assert from_model.deterministic is False
+    assert verdict.passed is True  # provenance does not move the gate
+
+
+def test_policy_findings_keep_their_provenance_through_the_gate() -> None:
+    spoof = {**HIGH_FINDING, "rule": "model.spoof", "severity": "LOW", "deterministic": True}
+    unsafe = plan(approval_required=False)
+    verdict = evaluate_gate(report(advisory_pass=True, findings=[spoof]), unsafe)
+    policy_rules = {f.rule for f in policy_findings(unsafe)}
+    assert policy_rules, "the unsafe plan raised no policy finding; the test checks nothing"
+    for finding in verdict.findings:
+        assert finding.deterministic is (finding.rule in policy_rules), finding.rule
+    assert verdict.passed is False
+
+
 def test_the_verdict_is_computed_not_taken_from_the_report() -> None:
     """SecurityReport has advisory_pass; GateVerdict has passed. They are
     different fields on purpose, and the orchestrator reads the second."""
