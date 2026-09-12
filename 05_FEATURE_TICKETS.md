@@ -707,7 +707,7 @@ None may weaken a security rule. The project owner ordered this work on
 **Acceptance criteria.** A developer reaches `PR_CREATED` from the UI alone, and failures are shown as failures.
 **Tests.** RTL tests; a failed stage renders as failed, never as passed.
 **Security.** The GitHub write requires the final stored approval, and no stage is fabricated.
-**Status.** `PENDING`
+**Status.** `DONE` — reviewer `PASS`, 2026-09-12.
 
 ### T6 — Pull request description
 **Purpose.** The PR explains what MCPForge did.

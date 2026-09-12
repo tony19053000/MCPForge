@@ -27,7 +27,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 
 ## Current ticket
 
-`T5b` — Journey UI: generation to pull request. T0–T5a and T6 are `DONE`; T7 (live end-to-end on `mcpforge-test`) follows T5b.
+`T7` — live end-to-end on `mcpforge-test`. T0–T6 are `DONE`. T7 needs the owner to push the demo app and its lockfile to `tony19053000/mcpforge-test`.
 
 `F9-01` — end-to-end pipeline test. **Code side passed review (round 3) and is committed; the ticket stays `PENDING`** until both live legs pass. The analysis leg needs the owner's go-ahead to spend a live Gemini run. The PR leg also needs `tony19053000/mcpforge-test` seeded — by the owner, by hand — with the demo app and its lockfile. Other carry-forwards: `F6-05` (needs a public URL) and running repository jobs inside the attested boundary.
 
@@ -94,6 +94,7 @@ Phase 7 took **ten review rounds**. Rounds 1–6 returned `FAIL` (10, 4, 3, 3, 2
 | T4 | Frontend pipeline client | PASS (round 1) |
 | T5a | Journey UI: analysis to plan approval | PASS (round 1) |
 | T6 | Pull request description | PASS (round 3) — built ahead of T5b |
+| T5b | Journey UI: generation to pull request | PASS (round 1) |
 
 ## In progress
 
@@ -101,7 +102,7 @@ None.
 
 ## Pending
 
-Phase 9 tickets `F9-01` through `F9-05`, T-track tickets `T5b` and `T7`–`T9`, plus `F6-05` (GitHub webhook, needs a public URL). See `05_FEATURE_TICKETS.md`.
+Phase 9 tickets `F9-01` through `F9-05`, T-track tickets `T7`–`T9`, plus `F6-05` (GitHub webhook, needs a public URL). See `05_FEATURE_TICKETS.md`.
 
 **Phase plan:** ten phases (0–9), 10% each, summing to 100%. Phase 9 — Hardening, Demo and Launch — was added during the Phase 0 review after the reviewer found the original plan stopped at 90%.
 
@@ -156,7 +157,7 @@ because the log records what was true at the time.
 
 | Check | State |
 |---|---|
-| Unit | **1819 passing** (as of T6, 2026-09-12) — 312 web (Vitest/RTL), 1507 API (pytest), 6 skipped (2 web; 4 API — the opt-in live JWKS check, one pre-existing, and the two F9-01 live legs, which run only under `MCPFORGE_E2E_LIVE=1`). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
+| Unit | **1856 passing** (as of T5b, 2026-09-12) — 349 web (Vitest/RTL), 1507 API (pytest), 6 skipped (2 web; 4 API — the opt-in live JWKS check, one pre-existing, and the two F9-01 live legs, which run only under `MCPFORGE_E2E_LIVE=1`). The image tests run under `MCPFORGE_IMAGE_TESTS_REQUIRED=1` in CI, which makes them fail rather than skip when Docker is unavailable. The 2 web skips are the live cross-tier check below, which runs rather than skips in CI. A further 15 run against live Firestore when opted in |
 | Integration | Covered within the suites above: FastAPI routes over ASGI transport with real RS256 tokens; SSE chat streaming; store conformance suite |
 | Live | Real Gemini structured call and stream, and a full real chat round trip through the API, both via manual scripts in `services/api/scripts/` |
 | Live cross-tier | `apps/web/tests/live-e2e.test.ts` — the real WebMCP tools, through the real adapter, over real HTTP against a running FastAPI server (`services/api/scripts/live_api.py`). The web CI job starts that server and sets `MCPFORGE_LIVE_REQUIRED=1`, which makes the check **fail** rather than skip when nothing is listening; locally it skips so a developer who did not start a server is not shown a red bar. Not browser E2E — there is no browser |
@@ -1726,3 +1727,45 @@ a policy rule id.
 cell renderers' `|` handling.
 
 **Next.** T5b: the journey UI from generation to pull request.
+
+### 0028 — T5b: the journey from generated code to an open pull request, in the UI
+
+**What was built.** The journey panel continues past plan approval: generate
+code, security review, validation, patch and PR approvals, and the pull request.
+New views in `components/pipeline/`: `patch-view.tsx` (mounts the existing
+`DiffView` with the real patch), `security-review-view.tsx`,
+`validation-view.tsx`, `pull-request-view.tsx`. Every stage's status comes from
+backend run state; each `*_FAILED` state orders before its `*_PASSED` state, so
+a failed review, validation or PR write can never render as done.
+
+**Decisions.**
+- Approvals stay two clicks: `ApprovalCard` records the decision, bound to the
+  displayed patch's hash, and a separate button (Generate code, Run validation,
+  Open pull request) consumes it. The consume button is disabled unless the
+  approval's hash matches the artifact on screen. The PR approval requires
+  typing "approve".
+- The security view's badge is the gate's verdict. The model reviewer's verdict
+  and finding text are labelled advisory — "Model reviewer's note (not a check
+  result)".
+- The PR URL is a link only if it is `https:`; otherwise it renders as text.
+- `onPlanApprovalChange` became `onGateApprovalChange`, since the panel now
+  reports patch and PR approvals too; one T5a test expectation changed because
+  generation is now driven from this panel.
+
+**Files.** `journey.ts`, `journey-panel.tsx`, the four new views,
+`workspace-view.tsx`; tests `journey-to-pr.test.tsx` (new),
+`journey-panel.test.tsx`.
+
+**Review gate outcome.** `PASS` on round 1, from a Sonnet reviewer that checked
+client types against the backend models and caught three mutations: a failed PR
+write shown as opened, an approval decided on mount, and the hash-match check
+forced true. The coder had reported a partial test run (143 tests); the
+reviewer and the main session ran the full suite.
+
+**Open.** `GET /pipeline/validation` does not return the `trust_level` stored
+with the validation record, so the validation view says so and points to the
+trust panel. Adding it to the response is a small backend change for a later
+ticket.
+
+**Next.** T7: one live run from login to PR on `tony19053000/mcpforge-test`,
+which needs the owner to push the demo app and its lockfile there first.

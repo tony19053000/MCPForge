@@ -363,7 +363,8 @@ describe("tool plan and its approval", () => {
     await waitFor(() =>
       expect(within(stageBadge("Approve tool plan")).getByText("Done")).toBeInTheDocument(),
     );
-    expect(within(stageBadge("Generate code")).getByText("Not yet")).toBeInTheDocument();
+    // Generation is driven by this panel since T5b, so it is the current stage.
+    expect(within(stageBadge("Generate code")).getByText("Current")).toBeInTheDocument();
   });
 
   it("rejects on a click and applies the rejection through the pipeline", async () => {

@@ -46,9 +46,9 @@ export function WorkspaceView() {
   // Server-read security state for the trust panel — F8-03. Null until the
   // first read succeeds: the panel is absent rather than guessed at.
   const [trust, setTrust] = useState<TrustStateDto | null>(null);
-  // The TOOL_PLAN approval the journey panel is showing beside its plan. The
-  // context panel does not repeat it, so the plan decision is taken once, next
-  // to what it covers.
+  // The approval the journey panel is showing beside what it covers (the tool
+  // plan, or the patch for PATCH and PULL_REQUEST). The context panel does not
+  // repeat it, so each decision is taken once, next to its artifact.
   const [journeyApprovalId, setJourneyApprovalId] = useState<string | null>(null);
 
   // Registers MCPForge's own WebMCP tools for this session, and tears them down
@@ -233,7 +233,7 @@ export function WorkspaceView() {
               ) : null}
               {approval && approval.id === journeyApprovalId ? (
                 <p className="text-sm text-subtle">
-                  The tool plan decision is shown with the plan in the workspace.
+                  This decision is shown in the workspace, next to what it covers.
                 </p>
               ) : approval ? (
                 <ApprovalCard
@@ -269,7 +269,7 @@ export function WorkspaceView() {
               <JourneyPanel
                 api={api}
                 sessionId={chatSession.id}
-                onPlanApprovalChange={setJourneyApprovalId}
+                onGateApprovalChange={setJourneyApprovalId}
               />
             </div>
             <Chat sessionId={chatSession.id} transport={api} />
